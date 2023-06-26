@@ -1,0 +1,23 @@
+<html>
+<head>
+    <style>
+      #orb_subsPH { position: static; overflow: auto; pointer-events:none; }
+    </style>
+    <script type="text/javascript" src="dash.all.min.js"></script>
+    <script>
+        let player;
+        function orb_loadMedia(url) {
+            const video = document.getElementById("orb_video");
+            player = orb_dashjs.MediaPlayer().create();
+            player.initialize(video, url, true);
+            player.attachTTMLRenderingDiv(document.getElementById('orb_subsPH'));
+            //video.src = url;
+            //video.play();
+        }
+   </script>
+</head>
+<body style='margin:0;background-color:#000;'>
+    <video id='orb_video' style="width:100%;height:100%"></video>
+    <div id='orb_subsPH'></div>
+</body>
+</html>
