@@ -1,6 +1,9 @@
 package org.orbtv.dvbiclient;
 
+import android.content.ContentResolver;
 import android.content.Context;
+import android.database.Cursor;
+import android.media.tv.TvContract;
 import android.util.Log;
 import android.view.View;
 
@@ -15,18 +18,49 @@ public class DvbIClient {
     private static DvbIClient mSingleton;
     private static final String TAG = DvbIClient.class.getSimpleName();
     private DvbIView mDvbIView;
+    private Context mContext;
+    private List<DvbChannel> mServices;
 
     private final ArrayList<DvbCallback> mDvbCallbacks = new ArrayList<>();
-    protected DvbIClient() {
-        //retrieve service list
+    protected DvbIClient(Context context) {
+        mContext = context;
+        mDvbIView = new DvbIView(context);
+
+        mServices = new ArrayList<>();
+        Cursor cursor = null;
+        ContentResolver resolver = context.getContentResolver();
+        try {
+            cursor = resolver.query(TvContract.Channels.CONTENT_URI, DvbChannel.PROJECTION,
+                    TvContract.Channels.COLUMN_SERVICE_TYPE + "='SERVICE_TYPE_DVBI'",
+                    null, null);
+            if (cursor != null && cursor.getCount() != 0) {
+                while (cursor.moveToNext()) {
+                    mServices.add(DvbChannel.fromCursor(cursor));
+                }
+            }
+        }
+        catch (Exception e) {
+            Log.w(TAG, "Unable to get channels", e);
+        }
+        finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
+
+        Log.i(TAG, "Number of DVBI services: " + mServices.size());
+
         //http request --> list
         //service instance --> xml ait
     }
 
-    public static DvbIClient getInstance() {
+    public static void instantiate(Context context) {
         if (mSingleton == null) {
-            mSingleton = new DvbIClient();
+            mSingleton = new DvbIClient(context);
         }
+    }
+
+    public static DvbIClient getInstance() {
         return mSingleton;
     }
 
@@ -38,10 +72,6 @@ public class DvbIClient {
 
     public void removeDvbCallback(DvbCallback handler) {
         mDvbCallbacks.remove(handler);
-    }
-
-    public void initialiseView(Context context) {
-        mDvbIView = new DvbIView(context);
     }
 
     public View getView() {
@@ -57,22 +87,16 @@ public class DvbIClient {
     }
 
     public List<DvbChannel> getListOfServices() {
-        List<DvbChannel> channels = new ArrayList<>();
-        try {
-            channels.add(createChannel());
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        Log.i(TAG, "Requesting list of services...");
-
-        return channels;
-    }
-
-    public int getNumberOfServices() {
-        return 1;
+        return mServices;
     }
 
     public boolean startServiceSearch() {
+        mServices.clear();
+        try {
+            mServices.add(createChannel());
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
         for (DvbCallback handler : mDvbCallbacks) {
             handler.onDvbiStatusChanged(100);
         }

@@ -7,9 +7,6 @@ import android.view.View;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
-import java.io.IOException;
-import java.util.Arrays;
-
 public class DvbIView extends WebView {
     private static final String DVBI_PAGE = "file:///android_asset/polyfill/dvbipage.html";
     private static final String TAG = DvbIView.class.getSimpleName();
@@ -26,7 +23,7 @@ public class DvbIView extends WebView {
         setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
-                Log.i(TAG, "onPageFinished" + url + "...");
+                Log.i(TAG, "onPageFinished " + url + "...");
                 evaluateJavascript("orb_loadMedia('" + mLastUrl + "')", null);
             }
 
@@ -35,11 +32,6 @@ public class DvbIView extends WebView {
                 DvbIView.this.setInitialScale((int) (DvbIView.this.getHeight() / 720.0 * 100.0));
             }
         });
-        try {
-            Log.i(TAG, "Found Assets: " + Arrays.toString(mContext.getAssets().list("polyfill")));
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
     }
 
     public boolean tune(String url) {
