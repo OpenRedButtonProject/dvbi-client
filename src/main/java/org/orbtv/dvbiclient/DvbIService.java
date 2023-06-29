@@ -335,7 +335,7 @@ class RelatedMaterial {
     }
 }
 
-class DVBIChannel {
+class DvbIChannel {
     private String channelType;
     private String idType;
     private String ccid;
@@ -350,8 +350,8 @@ class DVBIChannel {
     private String terminalChannel;
     private List<DvbIServiceInstance> serviceInstances = new ArrayList<>();
 
-    public static DVBIChannel createChannel(DvbIService service) {
-        DVBIChannel channel = new DVBIChannel();
+    public static DvbIChannel createChannel(DvbIService service) {
+        DvbIChannel channel = new DvbIChannel();
         channel.channelType = determineChannelType(service);
         channel.idType = determineIdType(service);
         channel.ccid = generateCCID();
@@ -368,31 +368,59 @@ class DVBIChannel {
         return channel;
     }
 
+    public static DvbIChannel createChannel(DvbIServiceInstance instance) {
+        DvbIChannel channel = new DvbIChannel();
+        channel.channelType = determineChannelType(instance);
+        channel.idType = determineIdType(instance);
+        channel.ccid = generateCCID();
+        channel.onid = determineOnid(instance);
+        channel.nid = null; // Undefined
+        channel.tsid = determineTsid(instance);
+        channel.sid = determineSid(instance);
+        channel.name = determineChannelName(instance);
+        channel.majorChannel = determineMajorChannel(instance);
+        channel.dsd = null; // Undefined
+        channel.ipBroadcastID = null; // Undefined
+        channel.terminalChannel = determineTerminalChannel(instance);
+        channel.serviceInstances = null;
+        return channel;
+    }    
+
     private static String determineChannelType(DvbIService service) {
-        if (service.getServiceType().equals("urn:dvb:metadata:cs:ServiceTypeCS:2019:linear-radio")) {
-            return "TYPE_RADIO";
-        } else if (service.getServiceType().equals("urn:dvb:metadata:cs:ServiceTypeCS:2019:linear") ||
-                service.getServiceType() == null) {
-            return "TYPE_TV";
-        } else if (service.getServiceType().equals("urn:dvb:metadata:cs:ServiceTypeCS:2019:data")) {
-            for (RelatedMaterial relatedMaterial : service.getRelatedMaterials()) {
-                if (relatedMaterial.getHowRelatedHref().equals("urn:dvb:metadata:cs:LinkedApplicationCS:2019") &&
-                        relatedMaterial.getMediaLocatorUri().contains("application/vnd.dvb.ait+xml")) {
-                    return "TYPE_HBBTV_DATA";
+        String serviceType = service.getServiceType();
+    
+        if (serviceType != null) {
+            if (serviceType.equals("urn:dvb:metadata:cs:ServiceTypeCS:2019:linear-radio")) {
+                return "TYPE_RADIO";
+            } else if (serviceType.equals("urn:dvb:metadata:cs:ServiceTypeCS:2019:linear")) {
+                return "TYPE_TV";
+            } else if (serviceType.equals("urn:dvb:metadata:cs:ServiceTypeCS:2019:data")) {
+                for (RelatedMaterial relatedMaterial : service.getRelatedMaterials()) {
+                    if (relatedMaterial.getHowRelatedHref().equals("urn:dvb:metadata:cs:LinkedApplicationCS:2019") &&
+                            relatedMaterial.getMediaLocatorUri().contains("application/vnd.dvb.ait+xml")) {
+                        return "TYPE_HBBTV_DATA";
+                    }
                 }
             }
         }
+        return "TYPE_OTHER";
+    }
+    
+    private static String determineChannelType(DvbIServiceInstance instance) {
         return "TYPE_OTHER";
     }
 
     private static String determineIdType(DvbIService service) {
         List<DvbIServiceInstance> instances = service.getInstances();
         String deliveryType = null;
-
-        // Check if all instances have the same deliveryType
+    
         boolean sameDeliveryType = true;
         for (DvbIServiceInstance instance : instances) {
             String instanceDeliveryType = instance.getDeliveryType();
+            if (instanceDeliveryType == null || instanceDeliveryType.isEmpty()) {
+                sameDeliveryType = false;
+                break;
+            }
             if (deliveryType == null) {
                 deliveryType = instanceDeliveryType;
             } else if (!deliveryType.equalsIgnoreCase(instanceDeliveryType)) {
@@ -402,7 +430,7 @@ class DVBIChannel {
         }
 
         // Determine the appropriate ID type based on the deliveryType
-        if (sameDeliveryType) {
+        if (sameDeliveryType && deliveryType != null) {
             String lowerCaseDeliveryType = deliveryType.toLowerCase();
             if (lowerCaseDeliveryType.contains("dvb-c")) {
                 return "ID_DVB_C";
@@ -416,8 +444,21 @@ class DVBIChannel {
         return "ID_DVB_I";
     }
 
+
+    private static String determineIdType(DvbIServiceInstance instance) {
+        return "ID_DVB_DASH";
+    }
+
     private static String determineOnid(DvbIService service) {
         Triplet triplet = service.getTriplet();
+        if (triplet != null) {
+            return triplet.getOrigNetId();
+        }
+        return null; // Undefined
+    }
+
+    private static String determineOnid(DvbIServiceInstance instance) {
+        Triplet triplet = instance.getTriplet();
         if (triplet != null) {
             return triplet.getOrigNetId();
         }
@@ -432,8 +473,24 @@ class DVBIChannel {
         return null; // Undefined
     }
 
+    private static String determineTsid(DvbIServiceInstance instance) {
+        Triplet triplet = instance.getTriplet();
+        if (triplet != null) {
+            return triplet.getTsId();
+        }
+        return null; // Undefined
+    }
+
     private static String determineSid(DvbIService service) {
         Triplet triplet = service.getTriplet();
+        if (triplet != null) {
+            return triplet.getServiceId();
+        }
+        return null; // Undefined
+    }
+
+    private static String determineSid(DvbIServiceInstance instance) {
+        Triplet triplet = instance.getTriplet();
         if (triplet != null) {
             return triplet.getServiceId();
         }
@@ -445,12 +502,27 @@ class DVBIChannel {
         return service.getServiceName();
     }
 
+    private static String determineChannelName(DvbIServiceInstance instance) {
+        //TODO: need to check for languages
+        return instance.getServiceName();
+    }
+
     private static String determineMajorChannel(DvbIService service) {
         //TODO: need to check LCN tablets
         return null; // Undefined
     }
 
+    private static String determineMajorChannel(DvbIServiceInstance instance) {
+        //TODO: need to check LCN tablets
+        return null; // Undefined
+    }
+
     private static String determineTerminalChannel(DvbIService service) {
+        // Logic to determine the terminalChannel
+        return null; // Undefined
+    }
+
+    private static String determineTerminalChannel(DvbIServiceInstance instance) {
         // Logic to determine the terminalChannel
         return null; // Undefined
     }
@@ -511,5 +583,21 @@ class DVBIChannel {
 
     public List<DvbIServiceInstance> getServiceInstances() {
         return serviceInstances;
+    }
+
+    public void printChannelProperties() {
+        System.out.println("--------------------------------");
+        System.out.println("Channel Type: " + channelType);
+        System.out.println("Id Type: " + idType);
+        System.out.println("CCID: " + ccid);
+        System.out.println("ONID: " + onid);
+        System.out.println("NID: " + nid);
+        System.out.println("TSID: " + tsid);
+        System.out.println("SID: " + sid);
+        System.out.println("Name: " + name);
+        System.out.println("Major Channel: " + majorChannel);
+        System.out.println("DSD: " + dsd);
+        System.out.println("IP Broadcast ID: " + ipBroadcastID);
+        System.out.println("Terminal Channel: " + terminalChannel);
     }
 }

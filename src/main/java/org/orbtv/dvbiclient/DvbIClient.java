@@ -28,16 +28,16 @@ public class DvbIClient {
     private Context mContext;
     private List<DvbChannel> mServices;
     private ServiceListDiscoveryTask mLastDiscoveryTask = null;
+    private List<DvbIChannel> mChannels;
 
     private final ArrayList<DvbCallback> mDvbCallbacks = new ArrayList<>();
     protected DvbIClient(Context context) {
         mContext = context;
         mDvbIView = new DvbIView(context);
         mServices = new ArrayList<>();
-        populateServices();
+        mChannels = new ArrayList<>();
 
-        //http request --> list
-        //service instance --> xml ait
+        populateServices();
     }
 
     public static void instantiate(Context context) {
@@ -178,8 +178,20 @@ public class DvbIClient {
 
                     // Return the response as a string
                     Log.i(TAG, responseBuilder.toString());
+
+                    
                     DvbIService service = DvbIService.parseFromXML(responseBuilder.toString());
-                    //DVBIChannel channel = DVBIChannel.createChannel(service);
+                    mChannels.add(DvbIChannel.createChannel(service));
+
+                    List<DvbIServiceInstance> instances = service.getInstances();
+                    for (DvbIServiceInstance instance : instances) {
+                        mChannels.add(DvbIChannel.createChannel(instance));
+                    }
+
+                    for (DvbIChannel channel : mChannels) {
+                        channel.printChannelProperties();
+                    }
+
                     synchronized (mServices) {
                         mServices.add(createChannel());
                     }
