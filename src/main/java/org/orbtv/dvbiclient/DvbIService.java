@@ -154,20 +154,32 @@ class DvbIServiceInstance {
 
     private static void parseDeliveryParameters(DvbIServiceInstance instance, XmlPullParser xpp) throws Exception {
         String deliveryType = xpp.getName();
-        Map<String, String> parameters = new HashMap<>();
+        String uri = null;
+
         int eventType = xpp.next();
         while (!(eventType == XmlPullParser.END_TAG && deliveryType.equals(xpp.getName()))) {
             if (eventType == XmlPullParser.START_TAG) {
-                String parameterName = xpp.getName();
-                String parameterValue = xpp.nextText();
-                parameters.put(parameterName, parameterValue);
+                if (xpp.getName().equals("UriBasedLocation")) {
+                    uri = parseUriBasedLocation(xpp);
+                }
             }
             eventType = xpp.next();
         }
-        
-        for (Map.Entry<String, String> entry : parameters.entrySet()) {
-            instance.deliveryParameters.put(entry.getKey(), entry.getValue());
+
+        if (uri != null) {
+            instance.deliveryParameters.put(deliveryType, uri);
         }
+    }
+
+    private static String parseUriBasedLocation(XmlPullParser xpp) throws Exception {
+        int eventType = xpp.next();
+        while (eventType != XmlPullParser.END_DOCUMENT) {
+            if (eventType == XmlPullParser.START_TAG && xpp.getName().equals("URI")) {
+                return xpp.nextText();
+            }
+            eventType = xpp.next();
+        }
+        return null;
     }
 
     private static String parseServiceType(String uri) {
