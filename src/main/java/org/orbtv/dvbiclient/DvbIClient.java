@@ -85,13 +85,16 @@ public class DvbIClient {
     }
 
     public boolean startServiceSearch() {
+        boolean ret = false;
         if (mLastDiscoveryTask == null) {
-            mServices.clear();
+            synchronized (mServices) {
+                mServices.clear();
+            }
             mLastDiscoveryTask = new ServiceListDiscoveryTask();
             mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/SofiaTestList.xml?ts=1687942834080");
-            return true;
+            ret = true;
         }
-        return false;
+        return ret;
     }
 
     private DvbChannel createChannel() throws JSONException {
@@ -106,9 +109,9 @@ public class DvbIClient {
             .setDisplayNumber("799")
             .setType("TYPE_DVB_I")
             .setServiceType("SERVICE_TYPE_DVBI")
-            .setOriginalNetworkId(1)
-            .setTransportStreamId(2)
-            .setServiceId(3)
+            .setOriginalNetworkId(0)
+            .setTransportStreamId(0)
+            .setServiceId(0)
             .setBrowsable(true)
             .setSearchable(true)
             .setInternalProviderData(data)
@@ -116,7 +119,7 @@ public class DvbIClient {
     }
 
     private void populateServices() {
-        mServices.clear();
+        //mServices.clear();
         Cursor cursor = null;
         ContentResolver resolver = mContext.getContentResolver();
         try {
@@ -175,7 +178,7 @@ public class DvbIClient {
 
                     // Return the response as a string
                     Log.i(TAG, responseBuilder.toString());
-                    //DvbIService service = DvbIService.parseFromXML(responseBuilder.toString());
+                    DvbIService service = DvbIService.parseFromXML(responseBuilder.toString());
                     //DVBIChannel channel = DVBIChannel.createChannel(service);
                     synchronized (mServices) {
                         mServices.add(createChannel());
@@ -207,7 +210,9 @@ public class DvbIClient {
                     handler.onDvbiStatusChanged(100);
                 }
             }
-            mLastDiscoveryTask = null;
+            synchronized (mLastDiscoveryTask) {
+                mLastDiscoveryTask = null;
+            }
         }
     }
 
