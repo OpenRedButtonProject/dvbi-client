@@ -9,6 +9,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.concurrent.TimeUnit;
+
 public class DvbIService {
     private String uniqueIdentifier;
     private String serviceName;
@@ -109,6 +113,7 @@ class DvbIServiceInstance {
     private Triplet triplet;
     private String deliveryType;
     private Map<String, String> deliveryParameters = new HashMap<>();
+    private List<RelatedMaterial> relatedMaterials = new ArrayList<>();
 
     public static DvbIServiceInstance parseFromXML(XmlPullParser xpp) throws Exception {
         DvbIServiceInstance instance = new DvbIServiceInstance();
@@ -126,8 +131,9 @@ class DvbIServiceInstance {
                         InstanceAvailabilityPeriod period = InstanceAvailabilityPeriod.parseFromXML(xpp);
                         instance.availabilityPeriods.add(period);
                         break;
-                    case "UriBasedLocation":
-                        instance.uri = xpp.nextText();
+                    case "RelatedMaterial":
+                        RelatedMaterial relatedMaterial = RelatedMaterial.parseFromXML(xpp);
+                        instance.relatedMaterials.add(relatedMaterial);
                         break;
                     case "DVBTriplet":
                         instance.triplet = Triplet.parseFromXML(xpp);
@@ -167,7 +173,7 @@ class DvbIServiceInstance {
         }
 
         if (uri != null) {
-            instance.deliveryParameters.put(deliveryType, uri);
+            instance.deliveryParameters.put("UriBasedLocation", uri);
         }
     }
 
@@ -221,6 +227,10 @@ class DvbIServiceInstance {
     public Map<String, String> getDeliveryParameters() {
         return deliveryParameters;
     }
+
+    public List<RelatedMaterial> getRelatedMaterials() {
+        return relatedMaterials;
+    }
 }
 
 class InstanceAvailabilityPeriod {
@@ -260,6 +270,25 @@ class InstanceAvailabilityPeriod {
 
     public String getDays() {
         return days;
+    }
+
+    public long duration() {
+        if (startTime == null || endTime == null || startTime.isEmpty() || endTime.isEmpty()) {
+            return 0;
+        }
+
+        try {
+            SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss");
+            Date startDate = format.parse(startTime);
+            Date endDate = format.parse(endTime);
+            long durationInMillis = endDate.getTime() - startDate.getTime();
+
+            return TimeUnit.MILLISECONDS.toMinutes(durationInMillis);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        return 0;
     }
 }
 
@@ -305,7 +334,9 @@ class Triplet {
 
 class RelatedMaterial {
     private String howRelatedHref;
+    private String howRelatedTermID;
     private String mediaLocatorUri;
+    private String mediaLocatorContentType;
 
     public static RelatedMaterial parseFromXML(XmlPullParser xpp) throws Exception {
         RelatedMaterial relatedMaterial = new RelatedMaterial();
@@ -315,9 +346,13 @@ class RelatedMaterial {
                 switch (xpp.getName()) {
                     case "HowRelated":
                         relatedMaterial.howRelatedHref = xpp.getAttributeValue(null, "href");
+                        relatedMaterial.howRelatedTermID = extractTermID(xpp.getAttributeValue(null, "href"));
                         break;
                     case "MediaLocator":
                         relatedMaterial.mediaLocatorUri = xpp.getAttributeValue(null, "mediaUri");
+                        break;
+                    case "MediaUri":
+                        relatedMaterial.mediaLocatorContentType = xpp.getAttributeValue(null, "contentType");
                         break;
                 }
             }
@@ -326,12 +361,34 @@ class RelatedMaterial {
         return relatedMaterial;
     }
 
+    private static String extractTermID(String href) {
+        if (href != null) {
+            int index = href.lastIndexOf(':');
+            if (index != -1) {
+                return href.substring(index + 1);
+            }
+        }
+        return null;
+    }
+
     public String getHowRelatedHref() {
         return howRelatedHref;
     }
 
+    public String getHowRelatedTermID() {
+        return howRelatedTermID;
+    }
+
     public String getMediaLocatorUri() {
         return mediaLocatorUri;
+    }
+
+    public String getMediaLocatorContentType() {
+        return mediaLocatorContentType;
+    }
+
+    public boolean isXmlAitContentType() {
+        return "application/vnd.dvb.ait+xml".equals(mediaLocatorContentType);
     }
 }
 
@@ -348,6 +405,7 @@ class DvbIChannel {
     private String dsd;
     private String ipBroadcastID;
     private String terminalChannel;
+    private String uri;
     private List<DvbIServiceInstance> serviceInstances = new ArrayList<>();
 
     public static DvbIChannel createChannel(DvbIService service) {
@@ -365,6 +423,7 @@ class DvbIChannel {
         channel.ipBroadcastID = service.getUniqueIdentifier();
         channel.terminalChannel = determineTerminalChannel(service);
         channel.serviceInstances = service.getInstances();
+        channel.uri = null;
         return channel;
     }
 
@@ -383,6 +442,7 @@ class DvbIChannel {
         channel.ipBroadcastID = null; // Undefined
         channel.terminalChannel = determineTerminalChannel(instance);
         channel.serviceInstances = null;
+        channel.uri = instance.getDeliveryParameters().get("UriBasedLocation");
         return channel;
     }    
 
@@ -599,5 +659,6 @@ class DvbIChannel {
         System.out.println("DSD: " + dsd);
         System.out.println("IP Broadcast ID: " + ipBroadcastID);
         System.out.println("Terminal Channel: " + terminalChannel);
+        System.out.println("Uri: " + uri);
     }
 }
