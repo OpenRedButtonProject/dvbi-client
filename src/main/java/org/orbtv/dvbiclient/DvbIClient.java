@@ -91,7 +91,9 @@ public class DvbIClient {
                 mServices.clear();
             }
             mLastDiscoveryTask = new ServiceListDiscoveryTask();
-            mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/SofiaTestList.xml?ts=1687942834080");
+            //mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/SofiaTestList.xml?ts=1687942834080");
+            //mLastDiscoveryTask.execute("http://192.168.1.145/config.xml");
+            mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/example.xml?ts=1688483136151");
             ret = true;
         }
         return ret;
@@ -179,13 +181,20 @@ public class DvbIClient {
                     // Return the response as a string
                     Log.i(TAG, responseBuilder.toString());
 
-                    
-                    DvbIService service = DvbIService.parseFromXML(responseBuilder.toString());
-                    mChannels.add(DvbIChannel.createChannel(service));
+                    ServiceList serviceList = ServiceList.parseFromXML(responseBuilder.toString());
+                    List<DvbIService> services = DvbIService.parseFromXML(responseBuilder.toString());
+                    serviceList.setServices(services);
 
-                    List<DvbIServiceInstance> instances = service.getInstances();
-                    for (DvbIServiceInstance instance : instances) {
-                        mChannels.add(DvbIChannel.createChannel(instance));
+                    String targetRegion = "";
+                    serviceList.setLCN(targetRegion);
+
+                    String preferredLanguage = "";
+                    for (DvbIService service : services) {
+                        mChannels.add(DvbIChannel.createChannel(service, preferredLanguage));
+                        List<DvbIServiceInstance> instances = service.getInstances();
+                        for (DvbIServiceInstance instance : instances) {
+                            mChannels.add(DvbIChannel.createChannel(instance));
+                        }
                     }
 
                     for (DvbIChannel channel : mChannels) {
