@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -177,23 +178,6 @@ public class DvbIService {
             }
             eventType = xpp.next();
         }
-
-
-        // Move the log statements here, outside the loop
-        for (DvbIService service : services) {
-            System.out.println("--");
-            System.out.println("service UniqueIdentifier: " + service.getUniqueIdentifier());
-
-            for (DvbIServiceInstance instance : service.getInstances()) {
-                if (instance.getTriplet() != null && !instance.getTriplet().isEmpty()) {
-                    System.out.println("  instance # uri: " + instance.getUri() + " serviceID: " + instance.getTriplet().getServiceId());
-                } else {
-                    System.out.println("  instance # uri: " + instance.getUri());
-                }
-            }
-        }
-
-
         return services;
     }
 
@@ -561,7 +545,6 @@ class RelatedMaterial {
 class DvbIChannel {
     private String channelType;
     private String idType;
-    private String ccid;
     private String onid;
     private String nid;
     private String tsid;
@@ -572,15 +555,15 @@ class DvbIChannel {
     private String ipBroadcastID;
     private String terminalChannel;
     private String uri;
+    private DvbIService parentService;
     private List<DvbIServiceInstance> serviceInstances = new ArrayList<>();
 
     public static DvbIChannel createChannel(DvbIService service, String preferredLanguage) {
         DvbIChannel channel = new DvbIChannel();
         channel.channelType = determineChannelType(service);
         channel.idType = determineIdType(service);
-        channel.ccid = generateCCID();
         channel.onid = determineOnid(service);
-        channel.nid = null; // Undefined
+        channel.nid = null; // Undefined or will be populated later
         channel.tsid = determineTsid(service);
         channel.sid = determineSid(service);
         channel.name = determineChannelName(service, preferredLanguage);
@@ -589,26 +572,25 @@ class DvbIChannel {
         channel.ipBroadcastID = service.getUniqueIdentifier();
         channel.terminalChannel = determineTerminalChannel(service);
         channel.serviceInstances = service.getInstances();
-        channel.uri = null;
+        channel.parentService = null;
         return channel;
     }
 
-    public static DvbIChannel createChannel(DvbIServiceInstance instance) {
+    public static DvbIChannel createChannel(DvbIService parentService, DvbIServiceInstance instance, String preferredLanguage) {
         DvbIChannel channel = new DvbIChannel();
-        channel.channelType = determineChannelType(instance);
+        channel.channelType = determineChannelType(parentService);
         channel.idType = determineIdType(instance);
-        channel.ccid = generateCCID();
         channel.onid = determineOnid(instance);
         channel.nid = null; // Undefined
         channel.tsid = determineTsid(instance);
         channel.sid = determineSid(instance);
-        channel.name = determineChannelName(instance);
-        channel.majorChannel = determineMajorChannel(instance);
-        channel.dsd = null; // Undefined
-        channel.ipBroadcastID = null; // Undefined
+        channel.name = determineChannelName(parentService, instance, preferredLanguage);
+        channel.majorChannel = determineMajorChannel(parentService);
+        channel.dsd = null; // Undefined or will be populated later
+        channel.ipBroadcastID = instance.getDeliveryParameters().get("UriBasedLocation");
         channel.terminalChannel = determineTerminalChannel(instance);
         channel.serviceInstances = null;
-        channel.uri = instance.getDeliveryParameters().get("UriBasedLocation");
+        channel.parentService = parentService;
         return channel;
     }
 
@@ -639,10 +621,6 @@ class DvbIChannel {
                 relatedMaterial.isXmlAitContentType();
     }
 
-    private static String determineChannelType(DvbIServiceInstance instance) {
-        return "TYPE_OTHER";
-    }
-
     private static String determineIdType(DvbIService service) {
         List<DvbIServiceInstance> instances = service.getInstances();
         String deliveryType = null;
@@ -663,14 +641,16 @@ class DvbIChannel {
         }
 
         // Determine the appropriate ID type based on the deliveryType and the additionalServiceParameters
+        // T2/S2 support?
         if (sameDeliveryType && deliveryType != null && service.getTriplet() != null && !service.getTriplet().isEmpty()) {
             String lowerCaseDeliveryType = deliveryType.toLowerCase();
-            if (lowerCaseDeliveryType.contains("dvb-c")) {
-                return "ID_DVB_C";
-            } else if (lowerCaseDeliveryType.contains("dvb-t")) {
-                return "ID_DVB_T";
-            } else if (lowerCaseDeliveryType.contains("dvb-s")) {
-                return "ID_DVB_S";
+            switch (lowerCaseDeliveryType) {
+                case "dvb-c":
+                    return "ID_DVB_C";
+                case "dvb-t":
+                    return "ID_DVB_T";
+                case "dvb-s":
+                    return "ID_DVB_S";
             }
         }
 
@@ -679,55 +659,70 @@ class DvbIChannel {
 
 
     private static String determineIdType(DvbIServiceInstance instance) {
-        return "ID_DVB_DASH";
-    }
+        String deliveryType = instance.getDeliveryType();
+
+        if (deliveryType != null && !deliveryType.isEmpty()) {
+            switch (deliveryType.toLowerCase()) {
+                case "dvb-c":
+                    return "ID_DVB_C";
+                case "dvb-t":
+                    return "ID_DVB_T";
+                case "dvb-s":
+                    return "ID_DVB_S";
+                case "dvb-dash":
+                    return "ID_DVB_DASH";
+            }
+        }
+        return "UNSUPPORTED"; //default value? also support for T2, S2
+}
+
 
     private static String determineOnid(DvbIService service) {
         Triplet triplet = service.getTriplet();
-        if (triplet != null) {
+        if (triplet != null && !triplet.isEmpty()) {
             return triplet.getOrigNetId();
         }
-        return null; // Undefined
+        return null;
     }
 
     private static String determineOnid(DvbIServiceInstance instance) {
         Triplet triplet = instance.getTriplet();
-        if (triplet != null) {
+        if (triplet != null && !triplet.isEmpty()) {
             return triplet.getOrigNetId();
         }
-        return null; // Undefined
+        return null;
     }
 
     private static String determineTsid(DvbIService service) {
         Triplet triplet = service.getTriplet();
-        if (triplet != null) {
+        if (triplet != null && !triplet.isEmpty()) {
             return triplet.getTsId();
         }
-        return null; // Undefined
+        return null;
     }
 
     private static String determineTsid(DvbIServiceInstance instance) {
         Triplet triplet = instance.getTriplet();
-        if (triplet != null) {
+        if (triplet != null && !triplet.isEmpty()) {
             return triplet.getTsId();
         }
-        return null; // Undefined
+        return null;
     }
 
     private static String determineSid(DvbIService service) {
         Triplet triplet = service.getTriplet();
-        if (triplet != null) {
+        if (triplet != null && !triplet.isEmpty()) {
             return triplet.getServiceId();
         }
-        return null; // Undefined
+        return null;
     }
 
     private static String determineSid(DvbIServiceInstance instance) {
         Triplet triplet = instance.getTriplet();
-        if (triplet != null) {
+        if (triplet != null && !triplet.isEmpty()) {
             return triplet.getServiceId();
         }
-        return null; // Undefined
+        return null;
     }
 
     private static String determineChannelName(DvbIService service, String preferredLanguage) {
@@ -746,49 +741,34 @@ class DvbIChannel {
                 return name;
             }
         }
-        return null; // Undefined
+        return null;
     }
 
-    private static String determineChannelName(DvbIServiceInstance instance) {
-        //TODO: need to check for languages
-        return instance.getServiceName();
+    private static String determineChannelName(DvbIService parentService, DvbIServiceInstance instance,  String preferredLanguage) {
+        String displayName = instance.getDisplayName();
+        if (displayName != null && !displayName.isEmpty()) {
+            return displayName;
+        }
+
+        return determineChannelName(parentService, preferredLanguage);
     }
 
     private static String determineMajorChannel(DvbIService service) {
         return service.getLCNNumber();
     }
 
-    private static String determineMajorChannel(DvbIServiceInstance instance) {
-        //TODO: need to check LCN tablets
-        return null; // Undefined
-    }
-
     private static String determineTerminalChannel(DvbIService service) {
-        // Logic to determine the terminalChannel
-        return null; // Undefined
+        return null; // Undefined - can be determined later
     }
 
     private static String determineTerminalChannel(DvbIServiceInstance instance) {
-        // Logic to determine the terminalChannel
+        // table O.3 is missing the property completely (error?) 
         return null; // Undefined
-    }
-
-    private static String generateCCID() {
-        // Logic to generate a unique CCID
-        return null; // Undefined
-    }
-
-    private static class Configuration {
-        public static String preferredUILanguage;
     }
 
     // Getter methods for the channel attributes
     public String getChannelType() {
         return channelType;
-    }
-
-    public String getCcid() {
-        return ccid;
     }
 
     public String getOnid() {
@@ -831,20 +811,36 @@ class DvbIChannel {
         return serviceInstances;
     }
 
+    public DvbIService getParentService() {
+        return parentService;
+    }
+
     public void printChannelProperties() {
         System.out.println("--------------------------------");
-        System.out.println("Channel Type: " + channelType);
-        System.out.println("Id Type: " + idType);
-        System.out.println("CCID: " + ccid);
-        System.out.println("ONID: " + onid);
-        System.out.println("NID: " + nid);
-        System.out.println("TSID: " + tsid);
-        System.out.println("SID: " + sid);
-        System.out.println("Name: " + name);
-        System.out.println("Major Channel: " + majorChannel);
-        System.out.println("DSD: " + dsd);
-        System.out.println("IP Broadcast ID: " + ipBroadcastID);
-        System.out.println("Terminal Channel: " + terminalChannel);
-        System.out.println("Uri: " + uri);
+        Map<String, String> properties = new LinkedHashMap<>();
+        properties.put("Channel Type", channelType);
+        properties.put("Id Type", idType);
+        properties.put("ONID", onid);
+        properties.put("NID", nid);
+        properties.put("TSID", tsid);
+        properties.put("SID", sid);
+        properties.put("Name", name);
+        properties.put("Major Channel", majorChannel);
+        properties.put("DSD", dsd);
+        properties.put("IP Broadcast ID", ipBroadcastID);
+        properties.put("Terminal Channel", terminalChannel);
+
+        for (Map.Entry<String, String> entry : properties.entrySet()) {
+            String propertyName = entry.getKey();
+            String propertyValue = entry.getValue();
+            if (propertyValue != null && !propertyValue.isEmpty()) {
+                System.out.println(propertyName + ": " + propertyValue);
+            }
+        }
+
+        if (serviceInstances != null) {
+            int numInstances = serviceInstances.size();
+            System.out.println("Number of Instances: " + numInstances);
+        }
     }
 }

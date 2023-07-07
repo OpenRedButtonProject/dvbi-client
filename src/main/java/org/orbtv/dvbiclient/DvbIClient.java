@@ -193,7 +193,7 @@ public class DvbIClient {
                         mChannels.add(DvbIChannel.createChannel(service, preferredLanguage));
                         List<DvbIServiceInstance> instances = service.getInstances();
                         for (DvbIServiceInstance instance : instances) {
-                            mChannels.add(DvbIChannel.createChannel(instance));
+                            mChannels.add(DvbIChannel.createChannel(service, instance, preferredLanguage));
                         }
                     }
 
