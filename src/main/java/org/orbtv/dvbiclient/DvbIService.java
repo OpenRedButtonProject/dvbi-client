@@ -131,6 +131,16 @@ public class DvbIService {
     private boolean selectable;
     private boolean visible;
 
+    private DvbIService() { }
+
+    public DvbIService(String name, String provider, String uid, String type, List<DvbIServiceInstance> instances) {
+        this.uniqueIdentifier = uid;
+        this.serviceName = name;
+        this.serviceType = type;
+        this.providerName = provider;
+        this.instances = instances;
+    }
+
     public static List<DvbIService> parseFromXML(String xml) throws Exception {
         List<DvbIService> services = new ArrayList<>();
     
@@ -180,7 +190,6 @@ public class DvbIService {
         }
         return services;
     }
-
 
     private static void parseAdditionalParameters(DvbIService service, XmlPullParser xpp) throws Exception {
         String extensionName = xpp.getAttributeValue(null, "extensionName");
@@ -244,6 +253,18 @@ class DvbIServiceInstance {
     private String deliveryType;
     private Map<String, String> deliveryParameters = new HashMap<>();
     private List<RelatedMaterial> relatedMaterials = new ArrayList<>();
+
+    private DvbIServiceInstance() { }
+
+    public DvbIServiceInstance(String displayName, String serviceName, int priority, String uri,
+                               Triplet triplet, String deliveryType) {
+        this.displayName = displayName;
+        this.serviceName = serviceName;
+        this.priority = priority;
+        this.uri = uri;
+        this.triplet = triplet;
+        this.deliveryType = deliveryType;
+    }
 
     public static DvbIServiceInstance parseFromXML(XmlPullParser xpp) throws Exception {
         DvbIServiceInstance instance = new DvbIServiceInstance();
@@ -318,6 +339,7 @@ class DvbIServiceInstance {
             eventType = xpp.next();
         }
 
+        instance.uri = uri;
         if (uri != null) {
             instance.deliveryParameters.put("UriBasedLocation", uri);
         }
@@ -442,6 +464,14 @@ class Triplet {
     private String origNetId;
     private String tsId;
     private String serviceId;
+
+    private Triplet() { }
+
+    public Triplet(String origNetId, String tsId, String serviceId) {
+        this.origNetId = origNetId;
+        this.tsId = tsId;
+        this.serviceId = serviceId;
+    }
 
     public static Triplet parseFromXML(XmlPullParser xpp) throws Exception {
         Triplet triplet = null;
