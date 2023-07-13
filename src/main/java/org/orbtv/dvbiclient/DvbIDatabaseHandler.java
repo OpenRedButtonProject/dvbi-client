@@ -12,8 +12,10 @@ import java.util.List;
 
 public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     private static final String TAG = DvbIDatabaseHandler.class.getSimpleName();
-    private static final int DB_VERSION = 1;
+    private static final int DB_VERSION = 3;
     private static final String DB_NAME = "dvbi_db";
+    private static final String FOREIGN_KEY_PREFIX_SERVICE = "service_";
+    private static final String FOREIGN_KEY_PREFIX_INSTANCE = "instance_";
     private static final String COLUMN_ID = "id";
 
     private static final String SERVICE_LISTS_TABLE = "service_lists";
@@ -28,12 +30,22 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
 
     private static final String SERVICE_INSTANCES_TABLE = "service_instances";
     private static final String SERVICE_INSTANCES_COLUMN_SERVICE_UID = "service_uid";
+    private static final String SERVICE_INSTANCES_COLUMN_NAME = "name";
+    private static final String SERVICE_INSTANCES_COLUMN_INDEX = "array_index";
     private static final String SERVICE_INSTANCES_COLUMN_URI = "uri";
-    private static final String SERVICE_INSTANCES_COLUMN_DELIVERY_PARAMS = "delivery_parameters";
+    private static final String SERVICE_INSTANCES_COLUMN_PRIORITY = "priority";
+
+
+    private static final String RELATED_MATERIALS_TABLE = "related_materials";
+    private static final String RELATED_MATERIALS_COLUMN_FOREIGN_KEY = "foreign_key";
+    private static final String RELATED_MATERIALS_COLUMN_INDEX = "array_index";
+    private static final String RELATED_MATERIALS_COLUMN_HOW_RELATED_HREF = "how_related_href";
+    private static final String RELATED_MATERIALS_COLUMN_HOW_RELATED_TERM_ID = "how_related_term_id";
+    private static final String RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_URI = "media_locator_uri";
+    private static final String RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE = "media_locator_content_type";
 
     public DvbIDatabaseHandler(Context context) {
         super(context, DB_NAME, null, DB_VERSION);
-        //onUpgrade(getWritableDatabase(), 0, 0);
     }
 
     @Override
@@ -53,8 +65,19 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
         db.execSQL("CREATE TABLE " + SERVICE_INSTANCES_TABLE + " ("
                 + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
                 + SERVICE_INSTANCES_COLUMN_SERVICE_UID + " TEXT NOT NULL, "
+                + SERVICE_INSTANCES_COLUMN_NAME + " TEXT, "
+                + SERVICE_INSTANCES_COLUMN_INDEX + " INTEGER NOT NULL, "
                 + SERVICE_INSTANCES_COLUMN_URI + " TEXT, "
-                + SERVICE_INSTANCES_COLUMN_DELIVERY_PARAMS + " BLOB)"
+                + SERVICE_INSTANCES_COLUMN_PRIORITY + " INTEGER)"
+        );
+        db.execSQL("CREATE TABLE " + RELATED_MATERIALS_TABLE + " ("
+                + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
+                + RELATED_MATERIALS_COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
+                + RELATED_MATERIALS_COLUMN_INDEX + " INTEGER NOT NULL, "
+                + RELATED_MATERIALS_COLUMN_HOW_RELATED_HREF + " TEXT, "
+                + RELATED_MATERIALS_COLUMN_HOW_RELATED_TERM_ID + " TEXT, "
+                + RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_URI + " TEXT, "
+                + RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE + " TEXT)"
         );
 
         // TODO: remove block
@@ -70,35 +93,9 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
         db.execSQL("DROP TABLE IF EXISTS " + SERVICE_INSTANCES_TABLE);
         db.execSQL("DROP TABLE IF EXISTS " + SERVICES_TABLE);
         db.execSQL("DROP TABLE IF EXISTS " + SERVICE_LISTS_TABLE);
+        db.execSQL("DROP TABLE IF EXISTS " + RELATED_MATERIALS_TABLE);
+        // TODO: delete dvbi services from the android channel database
         onCreate(db);
-    }
-
-    public synchronized List<DvbIServiceInstance> getServiceInstancesForUID(String uid) {
-        ArrayList<DvbIServiceInstance> instances = new ArrayList<>();
-        SQLiteDatabase db = getReadableDatabase();
-        String[] projection = { SERVICE_INSTANCES_COLUMN_URI };
-        Cursor cursor = null;
-        try
-        {
-            cursor = db.query(SERVICE_INSTANCES_TABLE, projection,
-                    SERVICE_INSTANCES_COLUMN_SERVICE_UID + "='" + uid + "'",
-                    null, null, null, null);
-            if (cursor != null)
-            {
-                while (cursor.moveToNext()) {
-                    instances.add(new DvbIServiceInstance("lala", "lalala", 1,
-                            cursor.getString(0), null, null));
-                }
-            }
-        }
-        finally
-        {
-            if (cursor != null)
-            {
-                cursor.close();
-            }
-        }
-        return instances;
     }
 
     public synchronized List<DvbIService> getServices() {
@@ -114,7 +111,8 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                 while (cursor.moveToNext())
                 {
                     ret.add(new DvbIService(cursor.getString(0), cursor.getString(1),
-                            cursor.getString(2), null, getServiceInstancesForUID(cursor.getString(2))));
+                            cursor.getString(2), null, getServiceInstancesForUID(db, cursor.getString(2)),
+                            getRelatedMaterials(db, FOREIGN_KEY_PREFIX_SERVICE + cursor.getString(2))));
                 }
             }
         }
@@ -141,7 +139,8 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
             if (cursor != null && cursor.moveToNext())
             {
                 service = new DvbIService(cursor.getString(0), cursor.getString(1),
-                        cursor.getString(2), null, getServiceInstancesForUID(cursor.getString(2)));
+                        cursor.getString(2), null, getServiceInstancesForUID(db, cursor.getString(2)),
+                        getRelatedMaterials(db, FOREIGN_KEY_PREFIX_SERVICE + cursor.getString(2)));
             }
         }
         finally
@@ -165,51 +164,134 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
             else {
                 uids += "'" + uid + "'";
             }
-            String[] projection = {COLUMN_ID};
-            long id = -1;
-            Cursor cursor = null;
-            try {
-                cursor = db.query(SERVICES_TABLE, projection, SERVICES_COLUMN_UNIQUE_IDENTIFIER + "=?",
-                        new String[]{uid}, null, null, null);
-                if (cursor != null && cursor.moveToNext()) {
-                    id = cursor.getLong(0);
-                }
-            } finally {
-                if (cursor != null) {
-                    cursor.close();
-                }
-            }
-
-            ContentValues values = new ContentValues();
-            values.put(SERVICES_COLUMN_SERVICE_LIST_ID, 1);
-            values.put(SERVICES_COLUMN_NAME, "My DVB-I service");
-            values.put(SERVICES_COLUMN_PROVIDER, service.getProviderName());
-            values.put(SERVICES_COLUMN_UNIQUE_IDENTIFIER, uid);
-            if (id == -1) {
-                db.insert(SERVICES_TABLE, null, values);
-                for (DvbIServiceInstance instance : service.getInstances()) {
-                    values = new ContentValues();
-                    values.put(SERVICE_INSTANCES_COLUMN_SERVICE_UID, uid);
-                    db.insert(SERVICE_INSTANCES_TABLE, null, values);
-                }
-                Log.d(TAG, "Adding service " + uid);
-            } else {
-                db.update(SERVICES_TABLE, values, COLUMN_ID + "=" + id, null);
-                for (DvbIServiceInstance instance : service.getInstances()) {
-                    // TODO: update service instances by id
-                    values = new ContentValues();
-                    values.put(SERVICE_INSTANCES_COLUMN_URI, instance.getUri());
-                    db.update(SERVICE_INSTANCES_TABLE, values,
-                            SERVICE_INSTANCES_COLUMN_SERVICE_UID + "='" + uid + "'", null);
-                }
-                // TODO: delete non-existent instances
-                Log.d(TAG, "Updating service " + uid);
-            }
+            updateService(db, service);
         }
         if (!uids.isEmpty()) {
             Log.i(TAG, "Deleting service and instances with UIDs not in " + uids);
+            // TODO: delete dvbi services from the android channel database not in uids
             db.delete(SERVICES_TABLE, SERVICES_COLUMN_UNIQUE_IDENTIFIER + " NOT IN (" + uids + ")", null);
             db.delete(SERVICE_INSTANCES_TABLE, SERVICE_INSTANCES_COLUMN_SERVICE_UID + " NOT IN (" + uids + ")", null);
+            // TODO: delete related materials for non-existent services/instances
         }
+    }
+
+    private void updateService(SQLiteDatabase db, DvbIService service) {
+        String uid = service.getUniqueIdentifier();
+        ContentValues values = new ContentValues();
+        values.put(SERVICES_COLUMN_SERVICE_LIST_ID, 1);
+        values.put(SERVICES_COLUMN_NAME, "My DVB-I service");
+        values.put(SERVICES_COLUMN_PROVIDER, service.getProviderName());
+        values.put(SERVICES_COLUMN_UNIQUE_IDENTIFIER, uid);
+
+        if (db.update(SERVICES_TABLE, values, SERVICES_COLUMN_UNIQUE_IDENTIFIER + "='" + uid + "'", null) == 0) {
+            db.insert(SERVICES_TABLE, null, values);
+            Log.d(TAG, "Adding service " + uid);
+        }
+        else {
+            Log.d(TAG, "Updating service " + uid);
+        }
+
+        updateRelatedMaterials(db, FOREIGN_KEY_PREFIX_SERVICE + uid, service.getRelatedMaterials());
+
+        List<DvbIServiceInstance> instances = service.getInstances();
+        for (int i = 0; i < instances.size(); ++i) {
+            DvbIServiceInstance instance = instances.get(i);
+            values = new ContentValues();
+            values.put(SERVICE_INSTANCES_COLUMN_SERVICE_UID, uid);
+            values.put(SERVICE_INSTANCES_COLUMN_PRIORITY, instance.getPriority());
+            values.put(SERVICE_INSTANCES_COLUMN_URI, instance.getUri());
+            values.put(SERVICE_INSTANCES_COLUMN_INDEX, i);
+            values.put(SERVICE_INSTANCES_COLUMN_NAME, instance.getDisplayName());
+            // in case there are more services than before, insert them
+            if (db.update(SERVICE_INSTANCES_TABLE, values,
+                    SERVICE_INSTANCES_COLUMN_SERVICE_UID + "='" + uid + "' AND "
+                            + SERVICE_INSTANCES_COLUMN_INDEX + "=" + i, null) == 0) {
+                db.insert(SERVICE_INSTANCES_TABLE, null, values);
+            }
+            updateRelatedMaterials(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + i, instance.getRelatedMaterials());
+        }
+        // in case there are less services than before, delete those that have
+        // higher index than the size of the current list
+        db.delete(SERVICE_INSTANCES_TABLE, SERVICE_INSTANCES_COLUMN_SERVICE_UID
+                + "='" + uid + "' AND " + SERVICE_INSTANCES_COLUMN_INDEX + ">="
+                + instances.size(), null);
+    }
+
+    private void updateRelatedMaterials(SQLiteDatabase db, String foreignKey, List<RelatedMaterial> materials) {
+        for (int i = 0; i < materials.size(); ++i) {
+            RelatedMaterial material = materials.get(i);
+            ContentValues values = new ContentValues();
+            values.put(RELATED_MATERIALS_COLUMN_FOREIGN_KEY, foreignKey);
+            values.put(RELATED_MATERIALS_COLUMN_INDEX, i);
+            values.put(RELATED_MATERIALS_COLUMN_HOW_RELATED_HREF, material.getHowRelatedHref());
+            values.put(RELATED_MATERIALS_COLUMN_HOW_RELATED_TERM_ID, material.getHowRelatedTermID());
+            values.put(RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_URI, material.getMediaLocatorUri());
+            values.put(RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE, material.getMediaLocatorContentType());
+            if (db.update(RELATED_MATERIALS_TABLE, values, RELATED_MATERIALS_COLUMN_FOREIGN_KEY
+                    + "='" + foreignKey + "' AND " + RELATED_MATERIALS_COLUMN_INDEX
+                    + "=" + i, null) == 0) {
+                db.insert(RELATED_MATERIALS_TABLE, null, values);
+            }
+        }
+        // in case there are less related materials than before, delete those that have
+        // higher index than the size of the current list
+        db.delete(RELATED_MATERIALS_TABLE, RELATED_MATERIALS_COLUMN_FOREIGN_KEY
+                + "='" + foreignKey + "' AND " + RELATED_MATERIALS_COLUMN_INDEX
+                + ">=" + materials.size(), null);
+    }
+
+    private List<RelatedMaterial> getRelatedMaterials(SQLiteDatabase db, String foreignKey) {
+        ArrayList<RelatedMaterial> materials = new ArrayList<>();
+        String[] projection = { RELATED_MATERIALS_COLUMN_HOW_RELATED_HREF, RELATED_MATERIALS_COLUMN_HOW_RELATED_TERM_ID,
+                RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_URI, RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE };
+        Cursor cursor = null;
+        try
+        {
+            cursor = db.query(RELATED_MATERIALS_TABLE, projection,
+                    RELATED_MATERIALS_COLUMN_FOREIGN_KEY + "='" + foreignKey + "'",
+                    null, null, null, RELATED_MATERIALS_COLUMN_INDEX);
+            if (cursor != null) {
+                while (cursor.moveToNext()) {
+                    materials.add (new RelatedMaterial(cursor.getString(0), cursor.getString(1),
+                            cursor.getString(2), cursor.getString(3)));
+                }
+            }
+        }
+        finally
+        {
+            if (cursor != null)
+            {
+                cursor.close();
+            }
+        }
+        return materials;
+    }
+
+    private List<DvbIServiceInstance> getServiceInstancesForUID(SQLiteDatabase db, String uid) {
+        ArrayList<DvbIServiceInstance> instances = new ArrayList<>();
+        String[] projection = { SERVICE_INSTANCES_COLUMN_URI, SERVICE_INSTANCES_COLUMN_PRIORITY,
+                SERVICE_INSTANCES_COLUMN_INDEX, SERVICE_INSTANCES_COLUMN_NAME };
+        Cursor cursor = null;
+        try
+        {
+            cursor = db.query(SERVICE_INSTANCES_TABLE, projection,
+                    SERVICE_INSTANCES_COLUMN_SERVICE_UID + "='" + uid + "'",
+                    null, null, null, SERVICE_INSTANCES_COLUMN_INDEX);
+            if (cursor != null)
+            {
+                while (cursor.moveToNext()) {
+                    instances.add(new DvbIServiceInstance(cursor.getString(3), cursor.getInt(1),
+                            cursor.getString(0), getRelatedMaterials(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + cursor.getInt(2))));
+                }
+            }
+        }
+        finally
+        {
+            if (cursor != null)
+            {
+                cursor.close();
+            }
+        }
+        return instances;
     }
 }

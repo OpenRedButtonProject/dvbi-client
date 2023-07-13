@@ -1,10 +1,6 @@
 package org.orbtv.dvbiclient;
 
-import android.content.ContentResolver;
 import android.content.Context;
-import android.database.Cursor;
-import android.media.tv.TvContract;
-import android.util.ArrayMap;
 import android.util.Log;
 import android.view.View;
 
@@ -30,9 +26,9 @@ public class DvbIClient {
     private DvbIView mDvbIView;
     private ServiceListDiscoveryTask mLastDiscoveryTask = null;
     private DvbIDatabaseHandler mDbHandler;
-
     private final ArrayList<DvbCallback> mDvbCallbacks = new ArrayList<>();
-    protected DvbIClient(Context context) {
+
+    private DvbIClient(Context context) {
         mDbHandler = new DvbIDatabaseHandler(context);
         mDvbIView = new DvbIView(context);
     }
@@ -63,15 +59,12 @@ public class DvbIClient {
 
     public boolean tune(String uid) {
         DvbIService service = mDbHandler.getServiceForUID(uid);
-        Log.i(TAG, "1 " + uid);
         if (service != null) {
-            Log.i(TAG, "2");
+            Log.i(TAG, "---------- Tuning to service ----------\n" + service + "\n------------------------------------");
             List<DvbIServiceInstance> instances = service.getInstances();
             for (DvbIServiceInstance instance : instances) {
                 String uri = instance.getUri();
-                Log.i(TAG, "3 " + uri);
                 if (uri != null) {
-                    Log.i(TAG, "Tuning to service " + uri);
                     for (DvbCallback handler : mDvbCallbacks) {
                         handler.onPlayerStatusChanged(null);
                     }
@@ -107,7 +100,7 @@ public class DvbIClient {
             mLastDiscoveryTask = new ServiceListDiscoveryTask();
             //mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/SofiaTestList.xml?ts=1687942834080");
             //mLastDiscoveryTask.execute("http://192.168.1.145/config.xml");
-            mLastDiscoveryTask.execute("http://192.168.1.145/servicelist.xml");
+            mLastDiscoveryTask.execute("http://192.168.1.145/config.xml");
             ret = true;
         }
         return ret;

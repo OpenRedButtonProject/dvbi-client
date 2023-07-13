@@ -133,12 +133,13 @@ public class DvbIService {
 
     private DvbIService() { }
 
-    public DvbIService(String name, String provider, String uid, String type, List<DvbIServiceInstance> instances) {
+    public DvbIService(String name, String provider, String uid, String type, List<DvbIServiceInstance> instances, List<RelatedMaterial> materials) {
         this.uniqueIdentifier = uid;
         this.serviceName = name;
         this.serviceType = type;
         this.providerName = provider;
         this.instances = instances;
+        this.relatedMaterials = materials;
     }
 
     public static List<DvbIService> parseFromXML(String xml) throws Exception {
@@ -189,6 +190,18 @@ public class DvbIService {
             eventType = xpp.next();
         }
         return services;
+    }
+    @Override
+    public String toString() {
+        String ret = "- " + this.getClass().getSimpleName() + " " + uniqueIdentifier + " -\n"
+                + "serviceName: " + this.serviceName;
+        for (RelatedMaterial mat : relatedMaterials) {
+            ret += "\n" + mat.toString();
+        }
+        for (DvbIServiceInstance instance : instances) {
+            ret += "\n" + instance.toString();
+        }
+        return ret;
     }
 
     private static void parseAdditionalParameters(DvbIService service, XmlPullParser xpp) throws Exception {
@@ -256,14 +269,11 @@ class DvbIServiceInstance {
 
     private DvbIServiceInstance() { }
 
-    public DvbIServiceInstance(String displayName, String serviceName, int priority, String uri,
-                               Triplet triplet, String deliveryType) {
+    public DvbIServiceInstance(String displayName, int priority, String uri, List<RelatedMaterial> relatedMaterials) {
         this.displayName = displayName;
-        this.serviceName = serviceName;
         this.priority = priority;
         this.uri = uri;
-        this.triplet = triplet;
-        this.deliveryType = deliveryType;
+        this.relatedMaterials = relatedMaterials;
     }
 
     public static DvbIServiceInstance parseFromXML(XmlPullParser xpp) throws Exception {
@@ -275,8 +285,8 @@ class DvbIServiceInstance {
                     case "DisplayName":
                         instance.displayName = xpp.nextText();
                         break;
-                    case "priority":
-                        instance.priority = Integer.parseInt(xpp.nextText());
+                    case "ServiceInstance":
+                        instance.priority = Integer.parseInt(xpp.getAttributeValue(null, "priority"));
                         break;
                     case "Availability":
                         InstanceAvailabilityPeriod period = InstanceAvailabilityPeriod.parseFromXML(xpp);
@@ -362,6 +372,18 @@ class DvbIServiceInstance {
             return lastPart;
         }
         return null;
+    }
+
+    @Override
+    public String toString() {
+        String ret = "- " + this.getClass().getSimpleName() + " -\n"
+                + "displayName: " + this.displayName + "\n"
+                + "uri: " + this.uri + "\n"
+                + "priority: " + this.priority;
+        for (RelatedMaterial mat : relatedMaterials) {
+            ret += "\n" + mat.toString();
+        }
+        return ret;
     }
 
     public String getDisplayName() {
@@ -518,6 +540,16 @@ class RelatedMaterial {
     private String mediaLocatorUri;
     private String mediaLocatorContentType;
 
+    private RelatedMaterial() { }
+
+    public RelatedMaterial(String howRelatedHref, String howRelatedTermID,
+                           String mediaLocatorUri, String mediaLocatorContentType) {
+        this.howRelatedHref = howRelatedHref;
+        this.howRelatedTermID = howRelatedTermID;
+        this.mediaLocatorUri = mediaLocatorUri;
+        this.mediaLocatorContentType = mediaLocatorContentType;
+    }
+
     public static RelatedMaterial parseFromXML(XmlPullParser xpp) throws Exception {
         RelatedMaterial relatedMaterial = new RelatedMaterial();
         int eventType = xpp.getEventType();
@@ -529,7 +561,7 @@ class RelatedMaterial {
                         relatedMaterial.howRelatedTermID = extractTermID(xpp.getAttributeValue(null, "href"));
                         break;
                     case "MediaLocator":
-                        relatedMaterial.mediaLocatorUri = xpp.getAttributeValue(null, "mediaUri");
+                        parseMediaLocator(xpp, relatedMaterial);
                         break;
                     case "MediaUri":
                         relatedMaterial.mediaLocatorContentType = xpp.getAttributeValue(null, "contentType");
@@ -541,6 +573,17 @@ class RelatedMaterial {
         return relatedMaterial;
     }
 
+    private static void parseMediaLocator(XmlPullParser xpp, RelatedMaterial relatedMaterial) throws Exception {
+        int eventType = xpp.next();
+        while (!(eventType == XmlPullParser.END_TAG && "MediaLocator".equals(xpp.getName()))) {
+            if (eventType == XmlPullParser.START_TAG && "MediaUri".equals(xpp.getName())) {
+                relatedMaterial.mediaLocatorContentType = xpp.getAttributeValue(null, "contentType");
+                relatedMaterial.mediaLocatorUri = xpp.nextText();
+            }
+            eventType = xpp.next();
+        }
+    }
+
     private static String extractTermID(String href) {
         if (href != null) {
             int index = href.lastIndexOf(':');
@@ -549,6 +592,15 @@ class RelatedMaterial {
             }
         }
         return null;
+    }
+
+    @Override
+    public String toString() {
+        return "- " + this.getClass().getSimpleName() + " -\n"
+                + "howRelatedHref: " + this.howRelatedHref + "\n"
+                + "howRelatedTermID: " + this.howRelatedTermID + "\n"
+                + "mediaLocatorContentType: " + this.mediaLocatorContentType + "\n"
+                + "mediaLocatorUri: " + this.mediaLocatorUri;
     }
 
     public String getHowRelatedHref() {
