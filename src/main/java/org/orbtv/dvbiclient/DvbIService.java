@@ -1,5 +1,7 @@
 package org.orbtv.dvbiclient;
 
+import org.json.JSONException;
+import org.json.JSONObject;
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserFactory;
 import org.xmlpull.v1.XmlPullParserException;
@@ -7,6 +9,7 @@ import org.xmlpull.v1.XmlPullParserException;
 import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
@@ -133,13 +136,14 @@ public class DvbIService {
 
     private DvbIService() { }
 
-    public DvbIService(String name, String provider, String uid, String type, List<DvbIServiceInstance> instances, List<RelatedMaterial> materials) {
+    public DvbIService(String name, String provider, String uid, String type, String lcn, List<DvbIServiceInstance> instances, List<RelatedMaterial> materials) {
         this.uniqueIdentifier = uid;
         this.serviceName = name;
         this.serviceType = type;
         this.providerName = provider;
         this.instances = instances;
         this.relatedMaterials = materials;
+        this.lcnNumber = lcn;
     }
 
     public static List<DvbIService> parseFromXML(String xml) throws Exception {
@@ -261,7 +265,6 @@ class DvbIServiceInstance {
     private String serviceName; 
     private int priority;
     private List<InstanceAvailabilityPeriod> availabilityPeriods = new ArrayList<>();
-    private String uri;
     private Triplet triplet;
     private String deliveryType;
     private Map<String, String> deliveryParameters = new HashMap<>();
@@ -269,11 +272,19 @@ class DvbIServiceInstance {
 
     private DvbIServiceInstance() { }
 
-    public DvbIServiceInstance(String displayName, int priority, String uri, List<RelatedMaterial> relatedMaterials) {
+    public DvbIServiceInstance(String displayName, int priority, JSONObject deliveryParams, List<RelatedMaterial> relatedMaterials) {
+        Iterator<String> keys = deliveryParams.keys();
         this.displayName = displayName;
         this.priority = priority;
-        this.uri = uri;
         this.relatedMaterials = relatedMaterials;
+        while(keys.hasNext()) {
+            String key = keys.next();
+            try {
+                this.deliveryParameters.put(key, deliveryParams.get(key).toString());
+            } catch (JSONException e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 
     public static DvbIServiceInstance parseFromXML(XmlPullParser xpp) throws Exception {
@@ -349,7 +360,6 @@ class DvbIServiceInstance {
             eventType = xpp.next();
         }
 
-        instance.uri = uri;
         if (uri != null) {
             instance.deliveryParameters.put("UriBasedLocation", uri);
         }
@@ -378,7 +388,7 @@ class DvbIServiceInstance {
     public String toString() {
         String ret = "- " + this.getClass().getSimpleName() + " -\n"
                 + "displayName: " + this.displayName + "\n"
-                + "uri: " + this.uri + "\n"
+                + "deliveryParams: " + this.deliveryParameters + "\n"
                 + "priority: " + this.priority;
         for (RelatedMaterial mat : relatedMaterials) {
             ret += "\n" + mat.toString();
@@ -403,7 +413,7 @@ class DvbIServiceInstance {
     }
 
     public String getUri() {
-        return uri;
+        return deliveryParameters.get("UriBasedLocation");
     }
 
     public Triplet getTriplet() {
@@ -636,7 +646,6 @@ class DvbIChannel {
     private String dsd;
     private String ipBroadcastID;
     private String terminalChannel;
-    private String uri;
     private DvbIService parentService;
     private List<DvbIServiceInstance> serviceInstances = new ArrayList<>();
 
