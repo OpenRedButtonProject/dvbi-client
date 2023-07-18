@@ -19,7 +19,7 @@ import java.util.Date;
 import java.util.concurrent.TimeUnit;
 
 class ServiceList {
-    private List<DvbIService> services;
+    List<DvbIService> services;
     private List<LCNTable> lcnTables;
     //rest of the members
 
@@ -51,13 +51,8 @@ class ServiceList {
         }
     }
 
-    public void setServices(List<DvbIService> services) {
-        this.services = services;
-    }
-
-    public static ServiceList parseFromXML(String xml) throws Exception {
+    public static ServiceList parseFromXML(String xml, String region) throws Exception {
         ServiceList serviceList = new ServiceList();
-        serviceList.lcnTables = new ArrayList<>();
 
         XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
         factory.setNamespaceAware(true);
@@ -69,6 +64,7 @@ class ServiceList {
         while (eventType != XmlPullParser.END_DOCUMENT) {
             if (eventType == XmlPullParser.START_TAG) {
                 if ("LCNTable".equals(xpp.getName())) {
+                    serviceList.lcnTables = new ArrayList<>();
                     String targetRegion = xpp.getAttributeValue(null, "targetRegion");
                     currentLCNTable = new LCNTable(targetRegion);
                     serviceList.lcnTables.add(currentLCNTable);
@@ -79,15 +75,18 @@ class ServiceList {
                     boolean visible = Boolean.parseBoolean(xpp.getAttributeValue(null, "visible"));
                     LCNEntry lcnEntry = new LCNEntry(channelNumber, serviceRef, selectable, visible);
                     currentLCNTable.lcnEntries.add(lcnEntry);
+                } else if ("Service".equals(xpp.getName())) {
+                    serviceList.services = DvbIService.parseFromXML(xpp);
                 }
             }
             eventType = xpp.next();
         }
 
+        serviceList.setLCN(region);
         return serviceList;
     }
 
-    public void setLCN(String targetRegion) {
+    private void setLCN(String targetRegion) {
         LCNTable matchingLCNTable;
         if (targetRegion == null || targetRegion.isEmpty()) {
             matchingLCNTable = lcnTables.get(0);
@@ -96,7 +95,7 @@ class ServiceList {
         }
 
         if (matchingLCNTable != null) {
-            for (DvbIService service : services) {
+            for (DvbIService service : this.services) {
                 String uniqueIdentifier = service.getUniqueIdentifier();
                 for (LCNEntry lcnEntry : matchingLCNTable.lcnEntries) {
                     if (lcnEntry.serviceRef.equals(uniqueIdentifier)) {
@@ -136,7 +135,11 @@ public class DvbIService {
 
     private DvbIService() { }
 
+<<<<<<< HEAD
     public DvbIService(String name, String provider, String uid, String type, String lcn, List<DvbIServiceInstance> instances, List<RelatedMaterial> materials) {
+=======
+    public DvbIService(String name, String provider, String uid, String type, List<DvbIServiceInstance> instances, List<RelatedMaterial> materials, String lcn) {
+>>>>>>> d588114 (Add LCN field to the DVB-I database.)
         this.uniqueIdentifier = uid;
         this.serviceName = name;
         this.serviceType = type;
@@ -146,14 +149,8 @@ public class DvbIService {
         this.lcnNumber = lcn;
     }
 
-    public static List<DvbIService> parseFromXML(String xml) throws Exception {
+    public static List<DvbIService> parseFromXML(XmlPullParser xpp) throws Exception {
         List<DvbIService> services = new ArrayList<>();
-    
-        XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
-        factory.setNamespaceAware(true);
-        XmlPullParser xpp = factory.newPullParser();
-        xpp.setInput(new StringReader(xml));
-    
         int eventType = xpp.getEventType();
         DvbIService currentService = null;
         while (eventType != XmlPullParser.END_DOCUMENT) {

@@ -27,10 +27,11 @@ public class DvbIClient {
     private ServiceListDiscoveryTask mLastDiscoveryTask = null;
     private DvbIDatabaseHandler mDbHandler;
     private final ArrayList<DvbCallback> mDvbCallbacks = new ArrayList<>();
-
+    private final ArrayList<HbbTVCallback> mHbbTVCallbacks = new ArrayList<>();
+    
     private DvbIClient(Context context) {
         mDbHandler = new DvbIDatabaseHandler(context);
-        mDvbIView = new DvbIView(context);
+        mDvbIView = new DvbIView(context, mHbbTVCallbacks);
     }
 
     public static void instantiate(Context context) {
@@ -51,6 +52,16 @@ public class DvbIClient {
 
     public synchronized void removeDvbCallback(DvbCallback handler) {
         mDvbCallbacks.remove(handler);
+    }
+
+    public synchronized void addHbbTVCallback(HbbTVCallback handler) {
+      if (!mHbbTVCallbacks.contains(handler)) {
+         mHbbTVCallbacks.add(handler);
+      }
+    }
+
+    public synchronized void removeHbbTVCallback(HbbTVCallback handler) {
+       mHbbTVCallbacks.remove(handler);
     }
 
     public View getView() {
@@ -98,30 +109,33 @@ public class DvbIClient {
         boolean ret = false;
         if (mLastDiscoveryTask == null) {
             mLastDiscoveryTask = new ServiceListDiscoveryTask();
-            //mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/SofiaTestList.xml?ts=1687942834080");
+          //  mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/example.xml?ts=1689243059951");
             //mLastDiscoveryTask.execute("http://192.168.1.145/config.xml");
-            mLastDiscoveryTask.execute("http://192.168.1.145/config.xml");
+            mLastDiscoveryTask.execute("http://192.168.1.145/servicelist.xml");
             ret = true;
         }
         return ret;
     }
 
     private DvbChannel createChannel(DvbIService service) throws JSONException {
+        DvbIChannel channel = DvbIChannel.createChannel(service, "");
         InternalProviderData data = new InternalProviderData();
         data.put("DVB_URI", "");
-        data.put("NET_ID", 254);
+        data.put("NET_ID", channel.getNid() == null ? "0" : channel.getNid());
         data.put("LOCKED", false);
-        data.put("ORIG_LCN", 799);
+        data.put("ORIG_LCN", service.getLCNNumber());
         data.put(KEY_DVBI_UID, service.getUniqueIdentifier());
-
+        int onid = channel.getNid() == null ? 0 : Integer.parseInt(channel.getNid());
+        int tsid = channel.getTsid() == null ? 0 : Integer.parseInt(channel.getTsid());
+        int sid = channel.getSid() == null ? 0 : Integer.parseInt(channel.getSid());
         return new DvbChannel.Builder()
-            .setDisplayName("My DVB-I service")
+            .setDisplayName(channel.getName())
             .setDisplayNumber(service.getLCNNumber())
             .setType(TYPE_DVB_I)
             .setServiceType("SERVICE_TYPE_DVBI")
-            .setOriginalNetworkId(0)
-            .setTransportStreamId(0)
-            .setServiceId(0)
+            .setOriginalNetworkId(onid)
+            .setTransportStreamId(tsid)
+            .setServiceId(sid)
             .setBrowsable(true)
             .setSearchable(true)
             .setInternalProviderData(data)
@@ -163,14 +177,10 @@ public class DvbIClient {
                     // Return the response as a string
                     Log.i(TAG, responseBuilder.toString());
 
-                   // ServiceList serviceList = ServiceList.parseFromXML(responseBuilder.toString());
-                    List<DvbIService> services = DvbIService.parseFromXML(responseBuilder.toString());
-                   // serviceList.setServices(services);
-
                     String targetRegion = "";
-                  //  serviceList.setLCN(targetRegion);
+                    ServiceList serviceList = ServiceList.parseFromXML(responseBuilder.toString(), targetRegion);
 
-                    for (DvbIService service : services) {
+                    for (DvbIService service : serviceList.services) {
                         DvbIChannel.createChannel(service,"").printChannelProperties();
                         List<DvbIServiceInstance> instances = service.getInstances();
                         for (DvbIServiceInstance instance : instances) {
@@ -178,7 +188,7 @@ public class DvbIClient {
                         }
                      //   mServices.add(service);
                     }
-                    mDbHandler.updateServices(services);
+                    mDbHandler.updateServices(serviceList.services);
 
                 }
             }
@@ -214,4 +224,10 @@ public class DvbIClient {
 
         protected void onPlayerStatusChanged(String state) { }
     }
+
+   public static class HbbTVCallback {
+      protected void onChannelChangeStatus(int origNetId, int transportId, int serviceId,
+         int channelStatus) {
+      }
+   }
 }
