@@ -135,11 +135,7 @@ public class DvbIService {
 
     private DvbIService() { }
 
-<<<<<<< HEAD
     public DvbIService(String name, String provider, String uid, String type, String lcn, List<DvbIServiceInstance> instances, List<RelatedMaterial> materials) {
-=======
-    public DvbIService(String name, String provider, String uid, String type, List<DvbIServiceInstance> instances, List<RelatedMaterial> materials, String lcn) {
->>>>>>> d588114 (Add LCN field to the DVB-I database.)
         this.uniqueIdentifier = uid;
         this.serviceName = name;
         this.serviceType = type;
