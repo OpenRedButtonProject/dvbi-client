@@ -5,6 +5,8 @@ import android.util.Log;
 import android.view.View;
 
 import org.json.JSONException;
+import org.orbtv.companionlibrary.callbacks.DvbCallback;
+import org.orbtv.companionlibrary.callbacks.HbbTVCallback;
 import org.orbtv.companionlibrary.model.DvbChannel;
 import org.orbtv.companionlibrary.model.InternalProviderData;
 import org.orbtv.companionlibrary.utils.AsyncUtils;
@@ -213,21 +215,9 @@ public class DvbIClient {
 
         private synchronized void finalizeSearch() {
             for (DvbCallback handler : mDvbCallbacks) {
-                handler.onSearchProgressChanged(100);
+                handler.onDvbtStatusChanged(100);
             }
             mLastDiscoveryTask = null;
         }
     }
-
-    public static class DvbCallback {
-        protected void onSearchProgressChanged(int progress) { }
-
-        protected void onPlayerStatusChanged(String state) { }
-    }
-
-   public static class HbbTVCallback {
-      protected void onChannelChangeStatus(int origNetId, int transportId, int serviceId,
-         int channelStatus) {
-      }
-   }
 }

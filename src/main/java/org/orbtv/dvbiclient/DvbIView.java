@@ -8,6 +8,8 @@ import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import org.orbtv.companionlibrary.callbacks.HbbTVCallback;
+
 import java.util.ArrayList;
 
 public class DvbIView extends WebView {
@@ -15,7 +17,7 @@ public class DvbIView extends WebView {
     private static final String TAG = DvbIView.class.getSimpleName();
     private final Context mContext;
     private String mLastUrl = "about:blank";
-    private final ArrayList<DvbIClient.HbbTVCallback> mIHbbTVCallbacks;
+    private final ArrayList<HbbTVCallback> mIHbbTVCallbacks;
 
     public class JavaScriptInterface {
         Context mContext;
@@ -29,14 +31,14 @@ public class DvbIView extends WebView {
             Log.d("JavaScriptInterface", "Video event: " + eventName + ", data: " + eventData);
 
             if("PLAYBACK_STARTED".equals(eventName)) {
-                for (DvbIClient.HbbTVCallback handler : mIHbbTVCallbacks) {
+                for (HbbTVCallback handler : mIHbbTVCallbacks) {
                     handler.onChannelChangeStatus(10,10,10,130); //130:CHANNEL_CHANGE_SUCCEEDED
                 }
             }
         }
     }
 
-    public DvbIView(Context context, ArrayList<DvbIClient.HbbTVCallback> hbbTVCallbacks) {
+    public DvbIView(Context context, ArrayList<HbbTVCallback> hbbTVCallbacks) {
         super(context);
         mContext = context;
         mIHbbTVCallbacks = hbbTVCallbacks;
