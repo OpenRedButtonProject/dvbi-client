@@ -110,7 +110,8 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     public synchronized List<DvbIService> getServices() {
         ArrayList<DvbIService> ret = new ArrayList<>();
         SQLiteDatabase db = getReadableDatabase();
-        String[] projection = { SERVICES_COLUMN_NAME, SERVICES_COLUMN_PROVIDER, SERVICES_COLUMN_UNIQUE_IDENTIFIER, SERVICES_COLUMN_LCN };
+        String[] projection = { SERVICES_COLUMN_NAME, SERVICES_COLUMN_PROVIDER, SERVICES_COLUMN_UNIQUE_IDENTIFIER,
+                SERVICES_COLUMN_LCN, SERVICES_COLUMN_ADDITIONAL_PARAMS };
         Cursor cursor = null;
         try
         {
@@ -119,8 +120,19 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
             {
                 while (cursor.moveToNext())
                 {
+                    Triplet triplet = null;
+                    try {
+                        String dvbUri = new JSONObject(new String(cursor.getBlob(4))).getString("hbbtv-i:DVBTriplet");
+                        if (dvbUri != null) {
+                            triplet = new Triplet(dvbUri);
+                        }
+                    }
+                    catch (JSONException e) { }
+                    catch (Exception e) {
+                        e.printStackTrace();
+                    }
                     ret.add(new DvbIService(cursor.getString(0), cursor.getString(1),
-                            cursor.getString(2), null, cursor.getString(3),
+                            cursor.getString(2), null, cursor.getString(3), triplet,
                             getServiceInstancesForUID(db, cursor.getString(2)),
                             getRelatedMaterials(db, FOREIGN_KEY_PREFIX_SERVICE + cursor.getString(2))));
                 }
@@ -139,7 +151,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     public synchronized DvbIService getServiceForUID(String uid) {
         DvbIService service = null;
         SQLiteDatabase db = getReadableDatabase();
-        String[] projection = { SERVICES_COLUMN_NAME, SERVICES_COLUMN_PROVIDER, SERVICES_COLUMN_UNIQUE_IDENTIFIER, SERVICES_COLUMN_LCN };
+        String[] projection = { SERVICES_COLUMN_NAME, SERVICES_COLUMN_PROVIDER, SERVICES_COLUMN_UNIQUE_IDENTIFIER, SERVICES_COLUMN_LCN, SERVICES_COLUMN_ADDITIONAL_PARAMS };
         Cursor cursor = null;
         try
         {
@@ -148,8 +160,17 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                     null, null, null, null);
             if (cursor != null && cursor.moveToNext())
             {
+                Triplet triplet = null;
+                try {
+                    String dvbUri = new JSONObject(new String(cursor.getBlob(4))).getString("hbbtv-i:DVBTriplet");
+                    if (dvbUri != null) {
+                        triplet = new Triplet(dvbUri);
+                    }
+                }
+                catch (Exception e) { }
                 service = new DvbIService(cursor.getString(0), cursor.getString(1),
-                        cursor.getString(2), null, cursor.getString(3), getServiceInstancesForUID(db, cursor.getString(2)),
+                        cursor.getString(2), null, cursor.getString(3), triplet,
+                        getServiceInstancesForUID(db, cursor.getString(2)),
                         getRelatedMaterials(db, FOREIGN_KEY_PREFIX_SERVICE + cursor.getString(2)));
             }
         }
@@ -187,11 +208,20 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     private void updateService(SQLiteDatabase db, DvbIService service) {
         String uid = service.getUniqueIdentifier();
         ContentValues values = new ContentValues();
+        JSONObject params = new JSONObject();
         values.put(SERVICES_COLUMN_SERVICE_LIST_ID, 1);
         values.put(SERVICES_COLUMN_NAME, "My DVB-I service");
         values.put(SERVICES_COLUMN_PROVIDER, service.getProviderName());
         values.put(SERVICES_COLUMN_UNIQUE_IDENTIFIER, uid);
         values.put(SERVICES_COLUMN_LCN, service.getLCNNumber());
+        if (service.getTriplet() != null) {
+            try {
+                params.put("hbbtv-i:DVBTriplet", service.getTriplet());
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+        }
+        values.put(SERVICES_COLUMN_ADDITIONAL_PARAMS, params.toString().getBytes(StandardCharsets.UTF_8));
 
         if (db.update(SERVICES_TABLE, values, SERVICES_COLUMN_UNIQUE_IDENTIFIER + "='" + uid + "'", null) == 0) {
             db.insert(SERVICES_TABLE, null, values);
@@ -206,7 +236,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
         List<DvbIServiceInstance> instances = service.getInstances();
         for (int i = 0; i < instances.size(); ++i) {
             DvbIServiceInstance instance = instances.get(i);
-            JSONObject params = new JSONObject();
+            params = new JSONObject();
             values = new ContentValues();
             values.put(SERVICE_INSTANCES_COLUMN_SERVICE_UID, uid);
             values.put(SERVICE_INSTANCES_COLUMN_PRIORITY, instance.getPriority());

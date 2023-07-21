@@ -8,7 +8,8 @@ import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
-import org.orbtv.companionlibrary.callbacks.HbbTVCallback;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 
@@ -17,7 +18,8 @@ public class DvbIView extends WebView {
     private static final String TAG = DvbIView.class.getSimpleName();
     private final Context mContext;
     private String mLastUrl = "about:blank";
-    private final ArrayList<HbbTVCallback> mIHbbTVCallbacks;
+
+    private final ArrayList<JSCallback> mJSCallbacks = new ArrayList<>();
 
     public class JavaScriptInterface {
         Context mContext;
@@ -29,19 +31,20 @@ public class DvbIView extends WebView {
         @JavascriptInterface
         public void onVideoEvent(String eventName, String eventData) {
             Log.d("JavaScriptInterface", "Video event: " + eventName + ", data: " + eventData);
-
-            if("PLAYBACK_STARTED".equals(eventName)) {
-                for (HbbTVCallback handler : mIHbbTVCallbacks) {
-                    handler.onChannelChangeStatus(10,10,10,130); //130:CHANNEL_CHANGE_SUCCEEDED
+            try {
+                JSONObject data = new JSONObject(eventData);
+                for(JSCallback handler : mJSCallbacks) {
+                    handler.onVideoEvent(eventName, data);
                 }
+            } catch (JSONException e) {
+                e.printStackTrace();
             }
         }
     }
 
-    public DvbIView(Context context, ArrayList<HbbTVCallback> hbbTVCallbacks) {
+    public DvbIView(Context context) {
         super(context);
         mContext = context;
-        mIHbbTVCallbacks = hbbTVCallbacks;
 
         setBackgroundColor(Color.TRANSPARENT);
         getSettings().setJavaScriptEnabled(true);
@@ -64,6 +67,16 @@ public class DvbIView extends WebView {
         });
     }
 
+    public void addJSCallback(JSCallback handler) {
+        if (!mJSCallbacks.contains(handler)) {
+            mJSCallbacks.add(handler);
+        }
+    }
+
+    public void removeJSCallback(JSCallback handler) {
+        mJSCallbacks.remove(handler);
+    }
+
     public boolean tune(String url) {
         Log.i(TAG, "Tuning to url " + url + "...");
         if (url.startsWith("http")) {
@@ -84,5 +97,10 @@ public class DvbIView extends WebView {
             this.setVisibility(View.INVISIBLE);
             this.loadUrl(mLastUrl);
         });
+    }
+
+    public static class JSCallback {
+        protected void onVideoEvent(String eventName, JSONObject data) {
+        }
     }
 }

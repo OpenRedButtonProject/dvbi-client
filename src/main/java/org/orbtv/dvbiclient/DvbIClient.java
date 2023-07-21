@@ -5,6 +5,7 @@ import android.util.Log;
 import android.view.View;
 
 import org.json.JSONException;
+import org.json.JSONObject;
 import org.orbtv.companionlibrary.callbacks.DvbCallback;
 import org.orbtv.companionlibrary.callbacks.HbbTVCallback;
 import org.orbtv.companionlibrary.model.DvbChannel;
@@ -18,22 +19,62 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class DvbIClient {
     public static final String TYPE_DVB_I = "TYPE_DVB_I";
     public static final String KEY_DVBI_UID = "DVBI_UID";
+    public static final String PLAYER_STATUS_STARTING = "DVBI_PLAYBACK_STARTED";
+    public static final String PLAYER_STATUS_PLAYING = "DVBI_PLAYBACK_PLAYING";
+    public static final String PLAYER_STATUS_BAD_CONNECTION = "DVBI_PLAYBACK_STALLED";
+    public static final String PLAYER_STATUS_ERROR = "DVBI_PLAYBACK_ERROR";;
+
+    private static final Map<String, Integer> HBBTV_CHANNEL_STATUS_LOOKUP = new HashMap<String, Integer>() {{
+        // key names according to the events received from Javascript interface in DvbIView
+        // values according to DvbGlue CHANNEL_CHANGE codes as expected in TvInputService
+        put(PLAYER_STATUS_STARTING, 129);
+        put(PLAYER_STATUS_PLAYING, 130);
+        put(PLAYER_STATUS_BAD_CONNECTION, 101);
+        put(PLAYER_STATUS_ERROR, 100);
+    }};
     private static DvbIClient mSingleton;
     private static final String TAG = DvbIClient.class.getSimpleName();
     private DvbIView mDvbIView;
     private ServiceListDiscoveryTask mLastDiscoveryTask = null;
     private DvbIDatabaseHandler mDbHandler;
+    private DvbIService mLastService;
     private final ArrayList<DvbCallback> mDvbCallbacks = new ArrayList<>();
     private final ArrayList<HbbTVCallback> mHbbTVCallbacks = new ArrayList<>();
+
+    private final DvbIView.JSCallback mJSCallback = new DvbIView.JSCallback() {
+        @Override
+        protected void onVideoEvent(String eventName, JSONObject data) {
+            if (mLastService != null && HBBTV_CHANNEL_STATUS_LOOKUP.containsKey(eventName)) {
+                Triplet triplet = mLastService.getTriplet();
+                int onid = 0;
+                int tsid = 0;
+                int sid = 0;
+                if (triplet != null) {
+                    onid = triplet.getOrigNetId();
+                    tsid = triplet.getTsId();
+                    sid = triplet.getServiceId();
+                }
+                for (HbbTVCallback handler : mHbbTVCallbacks) {
+                    handler.onChannelChangeStatus(onid, tsid, sid, HBBTV_CHANNEL_STATUS_LOOKUP.get(eventName));
+                }
+                for (DvbCallback handler : mDvbCallbacks) {
+                    handler.onPlayerStatusChanged(eventName);
+                }
+            }
+        }
+    };
     
     private DvbIClient(Context context) {
         mDbHandler = new DvbIDatabaseHandler(context);
-        mDvbIView = new DvbIView(context, mHbbTVCallbacks);
+        mDvbIView = new DvbIView(context);
+        mDvbIView.addJSCallback(mJSCallback);
     }
 
     public static void instantiate(Context context) {
@@ -71,16 +112,13 @@ public class DvbIClient {
     }
 
     public boolean tune(String uid) {
-        DvbIService service = mDbHandler.getServiceForUID(uid);
-        if (service != null) {
-            Log.i(TAG, "---------- Tuning to service ----------\n" + service + "\n------------------------------------");
-            List<DvbIServiceInstance> instances = service.getInstances();
+        mLastService = mDbHandler.getServiceForUID(uid);
+        if (mLastService != null) {
+            Log.i(TAG, "---------- Tuning to service ----------\n" + mLastService + "\n------------------------------------");
+            List<DvbIServiceInstance> instances = mLastService.getInstances();
             for (DvbIServiceInstance instance : instances) {
                 String uri = instance.getUri();
                 if (uri != null) {
-                    for (DvbCallback handler : mDvbCallbacks) {
-                        handler.onPlayerStatusChanged(null);
-                    }
                     return mDvbIView.tune(uri);
                 }
             }
@@ -112,8 +150,8 @@ public class DvbIClient {
         if (mLastDiscoveryTask == null) {
             mLastDiscoveryTask = new ServiceListDiscoveryTask();
           //  mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/example.xml?ts=1689243059951");
-            //mLastDiscoveryTask.execute("http://192.168.1.145/config.xml");
-            mLastDiscoveryTask.execute("http://192.168.1.145/servicelist.xml");
+            mLastDiscoveryTask.execute("http://192.168.1.145/config.xml");
+            //mLastDiscoveryTask.execute("http://192.168.1.145/servicelist.xml");
             ret = true;
         }
         return ret;
@@ -127,17 +165,14 @@ public class DvbIClient {
         data.put("LOCKED", false);
         data.put("ORIG_LCN", service.getLCNNumber());
         data.put(KEY_DVBI_UID, service.getUniqueIdentifier());
-        int onid = channel.getNid() == null ? 0 : Integer.parseInt(channel.getNid());
-        int tsid = channel.getTsid() == null ? 0 : Integer.parseInt(channel.getTsid());
-        int sid = channel.getSid() == null ? 0 : Integer.parseInt(channel.getSid());
         return new DvbChannel.Builder()
             .setDisplayName(channel.getName())
-            .setDisplayNumber(service.getLCNNumber())
+            .setDisplayNumber(channel.getMajorChannel())
             .setType(TYPE_DVB_I)
             .setServiceType("SERVICE_TYPE_DVBI")
-            .setOriginalNetworkId(onid)
-            .setTransportStreamId(tsid)
-            .setServiceId(sid)
+            .setOriginalNetworkId(channel.getOnid())
+            .setTransportStreamId(channel.getTsid())
+            .setServiceId(channel.getSid())
             .setBrowsable(true)
             .setSearchable(true)
             .setInternalProviderData(data)

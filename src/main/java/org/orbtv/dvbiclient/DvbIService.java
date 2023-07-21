@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.LinkedHashMap;
 
@@ -20,7 +21,7 @@ import java.util.concurrent.TimeUnit;
 
 class ServiceList {
     List<DvbIService> services;
-    private List<LCNTable> lcnTables;
+    private List<LCNTable> lcnTables = new ArrayList<>();
     //rest of the members
 
     private static class LCNTable {
@@ -64,7 +65,6 @@ class ServiceList {
         while (eventType != XmlPullParser.END_DOCUMENT) {
             if (eventType == XmlPullParser.START_TAG) {
                 if ("LCNTable".equals(xpp.getName())) {
-                    serviceList.lcnTables = new ArrayList<>();
                     String targetRegion = xpp.getAttributeValue(null, "targetRegion");
                     currentLCNTable = new LCNTable(targetRegion);
                     serviceList.lcnTables.add(currentLCNTable);
@@ -81,18 +81,29 @@ class ServiceList {
             }
             eventType = xpp.next();
         }
-
         serviceList.setLCN(region);
+        int maxLcn = serviceList.getNextAvailableLcn();
+        for (DvbIService service : serviceList.services) {
+            if (service.getLCNNumber() == null) {
+                service.setLCNNumber(String.valueOf(maxLcn++));
+            }
+        }
         return serviceList;
     }
 
-    private void setLCN(String targetRegion) {
-        LCNTable matchingLCNTable;
-        if (targetRegion == null || targetRegion.isEmpty()) {
-            matchingLCNTable = lcnTables.get(0);
-        } else {
-            matchingLCNTable = findMatchingLCNTable(targetRegion);
+    private int getNextAvailableLcn() {
+        int lcn = 0;
+        for (DvbIService service : services) {
+            int lcnNumber = service.getLCNNumber() == null ? lcn : Integer.parseInt(service.getLCNNumber());
+            if (lcnNumber > lcn) {
+                lcn = lcnNumber + 1;
+            }
         }
+        return lcn;
+    }
+
+    private void setLCN(String targetRegion) {
+        LCNTable matchingLCNTable = findMatchingLCNTable(targetRegion);
 
         if (matchingLCNTable != null) {
             for (DvbIService service : this.services) {
@@ -110,9 +121,15 @@ class ServiceList {
     }
 
     private LCNTable findMatchingLCNTable(String targetRegion) {
-        for (LCNTable lcnTable : lcnTables) {
-            if (lcnTable.targetRegion != null && lcnTable.targetRegion.equals(targetRegion)) {
-                return lcnTable;
+        if (lcnTables.size() > 0) {
+            if (targetRegion == null || targetRegion.isEmpty()) {
+                return lcnTables.get(0);
+            } else {
+                for (LCNTable lcnTable : lcnTables) {
+                    if (lcnTable.targetRegion != null && lcnTable.targetRegion.equals(targetRegion)) {
+                        return lcnTable;
+                    }
+                }
             }
         }
         return null;
@@ -135,7 +152,7 @@ public class DvbIService {
 
     private DvbIService() { }
 
-    public DvbIService(String name, String provider, String uid, String type, String lcn, List<DvbIServiceInstance> instances, List<RelatedMaterial> materials) {
+    public DvbIService(String name, String provider, String uid, String type, String lcn, Triplet triplet, List<DvbIServiceInstance> instances, List<RelatedMaterial> materials) {
         this.uniqueIdentifier = uid;
         this.serviceName = name;
         this.serviceType = type;
@@ -143,6 +160,7 @@ public class DvbIService {
         this.instances = instances;
         this.relatedMaterials = materials;
         this.lcnNumber = lcn;
+        this.triplet = triplet;
     }
 
     public static List<DvbIService> parseFromXML(XmlPullParser xpp) throws Exception {
@@ -190,8 +208,10 @@ public class DvbIService {
     }
     @Override
     public String toString() {
-        String ret = "- " + this.getClass().getSimpleName() + " " + uniqueIdentifier + " -\n"
-                + "serviceName: " + this.serviceName;
+        String ret = "- " + this.getClass().getSimpleName() + " " + uniqueIdentifier + " -"
+                + "\nserviceName: " + this.serviceName
+                + "\nlcn: " + this.lcnNumber
+                + "\ntriplet: " + this.triplet;
         for (RelatedMaterial mat : relatedMaterials) {
             ret += "\n" + mat.toString();
         }
@@ -275,8 +295,12 @@ class DvbIServiceInstance {
             try {
                 this.deliveryParameters.put(key, deliveryParams.get(key).toString());
             } catch (JSONException e) {
-                throw new RuntimeException(e);
+                e.printStackTrace();
             }
+        }
+        try {
+            this.triplet = new Triplet(deliveryParams.getString("DVBTriplet"));
+        } catch (Exception e) {
         }
     }
 
@@ -338,23 +362,25 @@ class DvbIServiceInstance {
 
     private static void parseDeliveryParameters(DvbIServiceInstance instance, XmlPullParser xpp) throws Exception {
         String deliveryType = xpp.getName();
-        String uri = null;
 
         int eventType = xpp.next();
         while (!(eventType == XmlPullParser.END_TAG && deliveryType.equals(xpp.getName()))) {
             if (eventType == XmlPullParser.START_TAG) {
-                if (xpp.getName().equals("UriBasedLocation")) {
-                    uri = parseUriBasedLocation(xpp);
-                }
-                if (xpp.getName().equals("DVBTriplet")) {
-                    instance.triplet = Triplet.parseFromXML(xpp);
+                switch (xpp.getName()) {
+                    case "UriBasedLocation":
+                        instance.deliveryParameters.put("UriBasedLocation", parseUriBasedLocation(xpp));
+                        break;
+                    case "DVBTriplet":
+                        instance.triplet = Triplet.parseFromXML(xpp);
+                        if (instance.triplet != null) {
+                            instance.deliveryParameters.put("DVBTriplet", instance.triplet.toString());
+                        }
+                        break;
+                    default:
+                        break;
                 }
             }
             eventType = xpp.next();
-        }
-
-        if (uri != null) {
-            instance.deliveryParameters.put("UriBasedLocation", uri);
         }
     }
 
@@ -379,10 +405,11 @@ class DvbIServiceInstance {
 
     @Override
     public String toString() {
-        String ret = "- " + this.getClass().getSimpleName() + " -\n"
-                + "displayName: " + this.displayName + "\n"
-                + "deliveryParams: " + this.deliveryParameters + "\n"
-                + "priority: " + this.priority;
+        String ret = "- " + this.getClass().getSimpleName() + " -"
+                + "\ndisplayName: " + this.displayName
+                + "\ndeliveryParams: " + this.deliveryParameters
+                + "\npriority: " + this.priority
+                + "\ntriplet: " + this.triplet;
         for (RelatedMaterial mat : relatedMaterials) {
             ret += "\n" + mat.toString();
         }
@@ -486,16 +513,22 @@ class InstanceAvailabilityPeriod {
 }
 
 class Triplet {
-    private String origNetId;
-    private String tsId;
-    private String serviceId;
+    private int origNetId = 0;
+    private int tsId = 0;
+    private int serviceId = 0;
 
     private Triplet() { }
 
-    public Triplet(String origNetId, String tsId, String serviceId) {
-        this.origNetId = origNetId;
-        this.tsId = tsId;
-        this.serviceId = serviceId;
+    public Triplet(String uri) throws Exception {
+        if (uri != null) {
+            String[] triplet = uri.substring(6).split("\\.");
+            this.origNetId = Integer.parseInt(triplet[0], 16);
+            this.tsId = Integer.parseInt(triplet[1], 16);
+            this.serviceId = Integer.parseInt(triplet[2], 16);
+        }
+        else {
+            throw new Exception("Uri argument must be non null");
+        }
     }
 
     public static Triplet parseFromXML(XmlPullParser xpp) throws Exception {
@@ -506,34 +539,38 @@ class Triplet {
                 if (eventType == XmlPullParser.START_TAG &&
                         ("DVBTriplet".equals(xpp.getName()) || "hbbtv-i:DVBTriplet".equals(xpp.getName()))) {
                     triplet = new Triplet();
-                    triplet.origNetId = xpp.getAttributeValue(null, "origNetId");
-                    triplet.tsId = xpp.getAttributeValue(null, "tsId");
-                    triplet.serviceId = xpp.getAttributeValue(null, "serviceId");
+                    String origNetId = xpp.getAttributeValue(null, "origNetId");
+                    String tsId = xpp.getAttributeValue(null, "tsId");
+                    String serviceId = xpp.getAttributeValue(null, "serviceId");
+                    triplet.origNetId = origNetId != null ? Integer.parseInt(origNetId) : 0;
+                    triplet.tsId = tsId != null ? Integer.parseInt(tsId) : 0;
+                    triplet.serviceId = serviceId != null ? Integer.parseInt(serviceId) : 0;
                     break;
                 }
                 eventType = xpp.next();
             }
         } catch (XmlPullParserException e) {
             e.printStackTrace();
-            triplet = new Triplet(); // Return an empty Triplet object in case of an error
+            //triplet = new Triplet(); // Return an empty Triplet object in case of an error
         }
         return triplet;
     }
 
-    public boolean isEmpty() {
-        return origNetId == null && tsId == null && serviceId == null;
-    }
-
-    public String getOrigNetId() {
+    public int getOrigNetId() {
         return origNetId;
     }
 
-    public String getTsId() {
+    public int getTsId() {
         return tsId;
     }
 
-    public String getServiceId() {
+    public int getServiceId() {
         return serviceId;
+    }
+
+    @Override
+    public String toString() {
+        return "dvb://" + String.format("%04x", origNetId) + "." + String.format("%04x", tsId) + "." + String.format("%04x", serviceId);
     }
 }
 
@@ -630,10 +667,10 @@ class RelatedMaterial {
 class DvbIChannel {
     private String channelType;
     private String idType;
-    private String onid;
+    private int onid;
     private String nid;
-    private String tsid;
-    private String sid;
+    private int tsid;
+    private int sid;
     private String name;
     private String majorChannel;
     private String dsd;
@@ -726,7 +763,7 @@ class DvbIChannel {
 
         // Determine the appropriate ID type based on the deliveryType and the additionalServiceParameters
         // T2/S2 support?
-        if (sameDeliveryType && deliveryType != null && service.getTriplet() != null && !service.getTriplet().isEmpty()) {
+        if (sameDeliveryType && deliveryType != null && service.getTriplet() != null) {
             String lowerCaseDeliveryType = deliveryType.toLowerCase();
             switch (lowerCaseDeliveryType) {
                 case "dvb-c":
@@ -761,52 +798,52 @@ class DvbIChannel {
 }
 
 
-    private static String determineOnid(DvbIService service) {
+    private static int determineOnid(DvbIService service) {
         Triplet triplet = service.getTriplet();
-        if (triplet != null && !triplet.isEmpty()) {
+        if (triplet != null) {
             return triplet.getOrigNetId();
         }
-        return null;
+        return 0;
     }
 
-    private static String determineOnid(DvbIServiceInstance instance) {
+    private static int determineOnid(DvbIServiceInstance instance) {
         Triplet triplet = instance.getTriplet();
-        if (triplet != null && !triplet.isEmpty()) {
+        if (triplet != null) {
             return triplet.getOrigNetId();
         }
-        return null;
+        return 0;
     }
 
-    private static String determineTsid(DvbIService service) {
+    private static int determineTsid(DvbIService service) {
         Triplet triplet = service.getTriplet();
-        if (triplet != null && !triplet.isEmpty()) {
+        if (triplet != null) {
             return triplet.getTsId();
         }
-        return null;
+        return 0;
     }
 
-    private static String determineTsid(DvbIServiceInstance instance) {
+    private static int determineTsid(DvbIServiceInstance instance) {
         Triplet triplet = instance.getTriplet();
-        if (triplet != null && !triplet.isEmpty()) {
+        if (triplet != null) {
             return triplet.getTsId();
         }
-        return null;
+        return 0;
     }
 
-    private static String determineSid(DvbIService service) {
+    private static int determineSid(DvbIService service) {
         Triplet triplet = service.getTriplet();
-        if (triplet != null && !triplet.isEmpty()) {
+        if (triplet != null) {
             return triplet.getServiceId();
         }
-        return null;
+        return 0;
     }
 
-    private static String determineSid(DvbIServiceInstance instance) {
+    private static int determineSid(DvbIServiceInstance instance) {
         Triplet triplet = instance.getTriplet();
-        if (triplet != null && !triplet.isEmpty()) {
+        if (triplet != null) {
             return triplet.getServiceId();
         }
-        return null;
+        return 0;
     }
 
     private static String determineChannelName(DvbIService service, String preferredLanguage) {
@@ -855,7 +892,7 @@ class DvbIChannel {
         return channelType;
     }
 
-    public String getOnid() {
+    public int getOnid() {
         return onid;
     }
 
@@ -863,11 +900,11 @@ class DvbIChannel {
         return nid;
     }
 
-    public String getTsid() {
+    public int getTsid() {
         return tsid;
     }
 
-    public String getSid() {
+    public int getSid() {
         return sid;
     }
 
@@ -904,10 +941,10 @@ class DvbIChannel {
         Map<String, String> properties = new LinkedHashMap<>();
         properties.put("Channel Type", channelType);
         properties.put("Id Type", idType);
-        properties.put("ONID", onid);
+        properties.put("ONID", String.format(Locale.ENGLISH, "%d", onid));
         properties.put("NID", nid);
-        properties.put("TSID", tsid);
-        properties.put("SID", sid);
+        properties.put("TSID", String.format(Locale.ENGLISH, "%d",tsid));
+        properties.put("SID", String.format(Locale.ENGLISH, "%d",sid));
         properties.put("Name", name);
         properties.put("Major Channel", majorChannel);
         properties.put("DSD", dsd);
