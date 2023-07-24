@@ -285,11 +285,12 @@ class DvbIServiceInstance {
 
     private DvbIServiceInstance() { }
 
-    public DvbIServiceInstance(String displayName, int priority, JSONObject deliveryParams, List<RelatedMaterial> relatedMaterials) {
+    public DvbIServiceInstance(String displayName, int priority, String deliveryType, JSONObject deliveryParams, List<RelatedMaterial> relatedMaterials) {
         Iterator<String> keys = deliveryParams.keys();
         this.displayName = displayName;
         this.priority = priority;
         this.relatedMaterials = relatedMaterials;
+        this.deliveryType = deliveryType;
         while(keys.hasNext()) {
             String key = keys.next();
             try {
@@ -409,7 +410,8 @@ class DvbIServiceInstance {
                 + "\ndisplayName: " + this.displayName
                 + "\ndeliveryParams: " + this.deliveryParameters
                 + "\npriority: " + this.priority
-                + "\ntriplet: " + this.triplet;
+                + "\ntriplet: " + this.triplet
+                + "\ndelivery type: " + this.deliveryType;
         for (RelatedMaterial mat : relatedMaterials) {
             ret += "\n" + mat.toString();
         }

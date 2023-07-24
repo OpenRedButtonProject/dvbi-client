@@ -1,6 +1,7 @@
 package org.orbtv.dvbiclient;
 
 import android.content.Context;
+import android.media.tv.TvContract;
 import android.util.Log;
 import android.view.View;
 
@@ -26,10 +27,17 @@ import java.util.Map;
 public class DvbIClient {
     public static final String TYPE_DVB_I = "TYPE_DVB_I";
     public static final String KEY_DVBI_UID = "DVBI_UID";
+
     public static final String PLAYER_STATUS_STARTING = "DVBI_PLAYBACK_STARTED";
     public static final String PLAYER_STATUS_PLAYING = "DVBI_PLAYBACK_PLAYING";
     public static final String PLAYER_STATUS_BAD_CONNECTION = "DVBI_PLAYBACK_STALLED";
-    public static final String PLAYER_STATUS_ERROR = "DVBI_PLAYBACK_ERROR";;
+    public static final String PLAYER_STATUS_ERROR = "DVBI_PLAYBACK_ERROR";
+
+    public static final int DELIVERY_TYPE_BROADCAST = 0;
+
+    public static final int DELIVERY_TYPE_BROADBAND = 1;
+
+    public static final int DELIVERY_TYPE_UNKNOWN = -1;
 
     private static final Map<String, Integer> HBBTV_CHANNEL_STATUS_LOOKUP = new HashMap<String, Integer>() {{
         // key names according to the events received from Javascript interface in DvbIView
@@ -47,10 +55,11 @@ public class DvbIClient {
     private DvbIService mLastService;
     private final ArrayList<DvbCallback> mDvbCallbacks = new ArrayList<>();
     private final ArrayList<HbbTVCallback> mHbbTVCallbacks = new ArrayList<>();
+    private final ArrayList<BroadcastCallback> mBroadcastCallbacks = new ArrayList<>();
 
     private final DvbIView.JSCallback mJSCallback = new DvbIView.JSCallback() {
         @Override
-        protected void onVideoEvent(String eventName, JSONObject data) {
+        public void onVideoEvent(String eventName, JSONObject data) {
             if (mLastService != null && HBBTV_CHANNEL_STATUS_LOOKUP.containsKey(eventName)) {
                 Triplet triplet = mLastService.getTriplet();
                 int onid = 0;
@@ -67,6 +76,7 @@ public class DvbIClient {
                 for (DvbCallback handler : mDvbCallbacks) {
                     handler.onPlayerStatusChanged(eventName);
                 }
+                Log.i(TAG, "Received video event " + eventName);
             }
         }
     };
@@ -98,33 +108,58 @@ public class DvbIClient {
     }
 
     public synchronized void addHbbTVCallback(HbbTVCallback handler) {
-      if (!mHbbTVCallbacks.contains(handler)) {
-         mHbbTVCallbacks.add(handler);
-      }
+        if (!mHbbTVCallbacks.contains(handler)) {
+            mHbbTVCallbacks.add(handler);
+        }
     }
 
     public synchronized void removeHbbTVCallback(HbbTVCallback handler) {
-       mHbbTVCallbacks.remove(handler);
+        mHbbTVCallbacks.remove(handler);
+    }
+
+    public synchronized void addBroadcastCallback(BroadcastCallback handler) {
+        if (!mBroadcastCallbacks.contains(handler)) {
+            mBroadcastCallbacks.add(handler);
+        }
+    }
+
+    public synchronized void removeBroadcastCallback(BroadcastCallback handler) {
+        mBroadcastCallbacks.remove(handler);
     }
 
     public View getView() {
         return mDvbIView;
     }
 
-    public boolean tune(String uid) {
+    public int tune(String uid) {
         mLastService = mDbHandler.getServiceForUID(uid);
+        Log.i(TAG, "---------- Tuning to service ----------\n" + mLastService + "\n------------------------------------");
         if (mLastService != null) {
-            Log.i(TAG, "---------- Tuning to service ----------\n" + mLastService + "\n------------------------------------");
-            List<DvbIServiceInstance> instances = mLastService.getInstances();
-            for (DvbIServiceInstance instance : instances) {
-                String uri = instance.getUri();
-                if (uri != null) {
-                    return mDvbIView.tune(uri);
+            DvbIServiceInstance maxPriorityInstance = null;
+            for (DvbIServiceInstance instance : mLastService.getInstances()) {
+                if (maxPriorityInstance == null || maxPriorityInstance.getPriority() < instance.getPriority()) {
+                    maxPriorityInstance = instance;
+                }
+            }
+            if (maxPriorityInstance != null) {
+                String uri = maxPriorityInstance.getUri();
+                Log.i(TAG, "Max priority instance of type " + maxPriorityInstance.getDeliveryType());
+                if (maxPriorityInstance.getDeliveryType().equals("dvb-dash")) {
+                    if (mDvbIView.tune(uri)) {
+                        return DELIVERY_TYPE_BROADBAND;
+                    }
+                }
+                else {
+                    mDvbIView.tuneOff();
+                    for (BroadcastCallback callback : mBroadcastCallbacks) {
+                        callback.onTune(maxPriorityInstance.getTriplet().toString());
+                    }
+                    return DELIVERY_TYPE_BROADCAST;
                 }
             }
         }
         Log.i(TAG, "Failed to tune to service.");
-        return false;
+        return DELIVERY_TYPE_UNKNOWN;
     }
 
     public void tuneOff() {
@@ -169,7 +204,7 @@ public class DvbIClient {
             .setDisplayName(channel.getName())
             .setDisplayNumber(channel.getMajorChannel())
             .setType(TYPE_DVB_I)
-            .setServiceType("SERVICE_TYPE_DVBI")
+            .setServiceType(TvContract.Channels.SERVICE_TYPE_AUDIO_VIDEO)
             .setOriginalNetworkId(channel.getOnid())
             .setTransportStreamId(channel.getTsid())
             .setServiceId(channel.getSid())
@@ -254,5 +289,9 @@ public class DvbIClient {
             }
             mLastDiscoveryTask = null;
         }
+    }
+
+    public interface BroadcastCallback {
+        void onTune(String uri);
     }
 }

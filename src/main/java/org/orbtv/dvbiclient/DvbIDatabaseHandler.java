@@ -17,7 +17,7 @@ import java.util.Map;
 
 public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     private static final String TAG = DvbIDatabaseHandler.class.getSimpleName();
-    private static final int DB_VERSION = 5;
+    private static final int DB_VERSION = 6;
     private static final String DB_NAME = "dvbi_db";
     private static final String FOREIGN_KEY_PREFIX_SERVICE = "service_";
     private static final String FOREIGN_KEY_PREFIX_INSTANCE = "instance_";
@@ -41,6 +41,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     private static final String SERVICE_INSTANCES_COLUMN_INDEX = "array_index";
     private static final String SERVICE_INSTANCES_COLUMN_PRIORITY = "priority";
     private static final String SERVICE_INSTANCES_COLUMN_DELIVERY_PARAMS = "delivery_params";
+    private static final String SERVICE_INSTANCES_COLUMN_DELIVERY_TYPE = "delivery_type";
 
 
     private static final String RELATED_MATERIALS_TABLE = "related_materials";
@@ -77,6 +78,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                 + SERVICE_INSTANCES_COLUMN_NAME + " TEXT, "
                 + SERVICE_INSTANCES_COLUMN_INDEX + " INTEGER NOT NULL, "
                 + SERVICE_INSTANCES_COLUMN_PRIORITY + " INTEGER,"
+                + SERVICE_INSTANCES_COLUMN_DELIVERY_TYPE + " TEXT,"
                 + SERVICE_INSTANCES_COLUMN_DELIVERY_PARAMS + " BLOB)"
         );
         db.execSQL("CREATE TABLE " + RELATED_MATERIALS_TABLE + " ("
@@ -242,6 +244,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
             values.put(SERVICE_INSTANCES_COLUMN_PRIORITY, instance.getPriority());
             values.put(SERVICE_INSTANCES_COLUMN_INDEX, i);
             values.put(SERVICE_INSTANCES_COLUMN_NAME, instance.getDisplayName());
+            values.put(SERVICE_INSTANCES_COLUMN_DELIVERY_TYPE, instance.getDeliveryType());
             for (Map.Entry<String,String> entry : instance.getDeliveryParameters().entrySet()) {
                 try {
                     params.put(entry.getKey(), entry.getValue());
@@ -319,7 +322,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     private List<DvbIServiceInstance> getServiceInstancesForUID(SQLiteDatabase db, String uid) {
         ArrayList<DvbIServiceInstance> instances = new ArrayList<>();
         String[] projection = { SERVICE_INSTANCES_COLUMN_DELIVERY_PARAMS, SERVICE_INSTANCES_COLUMN_PRIORITY,
-                SERVICE_INSTANCES_COLUMN_INDEX, SERVICE_INSTANCES_COLUMN_NAME };
+                SERVICE_INSTANCES_COLUMN_INDEX, SERVICE_INSTANCES_COLUMN_NAME, SERVICE_INSTANCES_COLUMN_DELIVERY_TYPE };
         Cursor cursor = null;
         try
         {
@@ -331,7 +334,8 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                 while (cursor.moveToNext()) {
                     try {
                         instances.add(new DvbIServiceInstance(cursor.getString(3), cursor.getInt(1),
-                                new JSONObject(new String(cursor.getBlob(0))), getRelatedMaterials(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + cursor.getInt(2))));
+                                cursor.getString(4), new JSONObject(new String(cursor.getBlob(0))),
+                                getRelatedMaterials(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + cursor.getInt(2))));
                     } catch (JSONException e) {
                         throw new RuntimeException(e);
                     }

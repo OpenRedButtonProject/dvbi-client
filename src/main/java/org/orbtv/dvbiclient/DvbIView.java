@@ -99,8 +99,7 @@ public class DvbIView extends WebView {
         });
     }
 
-    public static class JSCallback {
-        protected void onVideoEvent(String eventName, JSONObject data) {
-        }
+    public interface JSCallback {
+        void onVideoEvent(String eventName, JSONObject data);
     }
 }
