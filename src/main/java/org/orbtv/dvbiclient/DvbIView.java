@@ -18,6 +18,7 @@ public class DvbIView extends WebView {
     private static final String TAG = DvbIView.class.getSimpleName();
     private final Context mContext;
     private String mLastUrl = "about:blank";
+    private Boolean mPageLoaded = false;
 
     private final ArrayList<JSCallback> mJSCallbacks = new ArrayList<>();
 
@@ -57,7 +58,10 @@ public class DvbIView extends WebView {
             @Override
             public void onPageFinished(WebView view, String url) {
                 Log.i(TAG, "onPageFinished " + url + "...");
-                evaluateJavascript("orb_loadMedia('" + mLastUrl + "')", null);
+                synchronized (mPageLoaded) {
+                    evaluateJavascript("orb_loadMedia('" + mLastUrl + "')", null);
+                    mPageLoaded = true;
+                }
             }
 
             @Override
@@ -80,10 +84,21 @@ public class DvbIView extends WebView {
     public boolean tune(String url) {
         Log.i(TAG, "Tuning to url " + url + "...");
         if (url.startsWith("http")) {
-            mLastUrl = url;
             mContext.getMainExecutor().execute(() -> {
-                this.setVisibility(View.VISIBLE);
-                this.loadUrl(DVBI_PAGE);
+                synchronized (mPageLoaded) {
+                    mLastUrl = url;
+                    JSONObject data = new JSONObject();
+                    for(JSCallback handler : mJSCallbacks) {
+                        handler.onVideoEvent("DVBI_PLAYBACK_STARTED", data);
+                    }
+                    if (!DVBI_PAGE.equals(this.getUrl())) {
+                        mPageLoaded = false;
+                        this.setVisibility(View.VISIBLE);
+                        this.loadUrl(DVBI_PAGE);
+                    } else if (mPageLoaded) {
+                        evaluateJavascript("orb_loadMedia('" + mLastUrl + "')", null);
+                    }
+                }
             });
             return true;
         }
@@ -92,10 +107,13 @@ public class DvbIView extends WebView {
 
     public void tuneOff() {
         Log.i(TAG, "Tuning off...");
-        mLastUrl = "about:blank";
         mContext.getMainExecutor().execute(() -> {
-            this.setVisibility(View.INVISIBLE);
-            this.loadUrl(mLastUrl);
+            synchronized (mPageLoaded) {
+                mLastUrl = "about:blank";
+                mPageLoaded = false;
+                this.setVisibility(View.INVISIBLE);
+                this.loadUrl("about:blank");
+            }
         });
     }
 

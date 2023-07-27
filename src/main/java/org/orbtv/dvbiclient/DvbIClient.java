@@ -1,5 +1,6 @@
 package org.orbtv.dvbiclient;
 
+
 import android.content.Context;
 import android.media.tv.TvContract;
 import android.util.Log;
@@ -53,9 +54,16 @@ public class DvbIClient {
     private ServiceListDiscoveryTask mLastDiscoveryTask = null;
     private DvbIDatabaseHandler mDbHandler;
     private DvbIService mLastService;
+    private DvbIServiceInstance mLastServiceInstace;
     private final ArrayList<DvbCallback> mDvbCallbacks = new ArrayList<>();
     private final ArrayList<HbbTVCallback> mHbbTVCallbacks = new ArrayList<>();
     private final ArrayList<BroadcastCallback> mBroadcastCallbacks = new ArrayList<>();
+    private ProcessXmlAitCallback processXmlAitCallback;
+    private Boolean mReadyForApps = false;
+
+    public interface ProcessXmlAitCallback {
+        void processXmlAit(String xmlAit);
+    }
 
     private final DvbIView.JSCallback mJSCallback = new DvbIView.JSCallback() {
         @Override
@@ -77,10 +85,61 @@ public class DvbIClient {
                     handler.onPlayerStatusChanged(eventName);
                 }
                 Log.i(TAG, "Received video event " + eventName);
+
+                if (mReadyForApps && eventName.equals(PLAYER_STATUS_PLAYING)) {
+                    List<String> appUri;
+                    if (processXmlAitCallback != null) {
+                        appUri = DvbIChannelAdapter.createChannel(mLastService, mLastServiceInstace, "").getAppParallelUris();
+                        if (appUri.isEmpty()) {
+                            appUri = DvbIChannelAdapter.createChannel(mLastService, "").getAppParallelUris();
+                        }
+                        Log.i(TAG, "Found Hbbtv App from Related Materials (" + appUri + ")");
+                        new GetXmlAitTask().execute(appUri.get(0));
+                    }
+                }
             }
         }
     };
+
+    private class GetXmlAitTask extends AsyncUtils<String, String> {
+        @Override
+        protected String doInBackground(String... uris) {
+            return getXmlAit(uris[0]);
+        }
     
+        @Override
+        protected void onPostExecute(String result) {
+            if (processXmlAitCallback != null && result != null) {
+                processXmlAitCallback.processXmlAit(result);
+                mReadyForApps = false;
+            }
+        }
+    }
+
+    private String getXmlAit(String uri) {
+        try {
+            URL url = new URL(uri);
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+    
+            int responseCode = connection.getResponseCode();
+    
+            if (responseCode == HttpURLConnection.HTTP_OK) {
+                BufferedReader in = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+                String inputLine;
+                StringBuilder content = new StringBuilder();
+                while ((inputLine = in.readLine()) != null) {
+                    content.append(inputLine);
+                }
+                in.close();
+                return content.toString();
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "Error fetching XML AIT", e);
+        }
+        return null;
+    }
+
     private DvbIClient(Context context) {
         mDbHandler = new DvbIDatabaseHandler(context);
         mDvbIView = new DvbIView(context);
@@ -127,12 +186,18 @@ public class DvbIClient {
         mBroadcastCallbacks.remove(handler);
     }
 
+    public synchronized void setProcessXmlAitCallback(ProcessXmlAitCallback callback) {
+        this.processXmlAitCallback = callback;
+    }
+
     public View getView() {
         return mDvbIView;
     }
 
     public int tune(String uid) {
         mLastService = mDbHandler.getServiceForUID(uid);
+        mLastServiceInstace = null;
+        mReadyForApps = false;
         Log.i(TAG, "---------- Tuning to service ----------\n" + mLastService + "\n------------------------------------");
         if (mLastService != null) {
             DvbIServiceInstance maxPriorityInstance = null;
@@ -141,17 +206,21 @@ public class DvbIClient {
                     maxPriorityInstance = instance;
                 }
             }
+
+            mLastServiceInstace = maxPriorityInstance;
             if (maxPriorityInstance != null) {
                 String uri = maxPriorityInstance.getUri();
                 Log.i(TAG, "Max priority instance of type " + maxPriorityInstance.getDeliveryType());
                 if (maxPriorityInstance.getDeliveryType().equals("dvb-dash")) {
                     if (mDvbIView.tune(uri)) {
+                        mReadyForApps = true;
                         return DELIVERY_TYPE_BROADBAND;
                     }
                 }
                 else {
                     mDvbIView.tuneOff();
                     for (BroadcastCallback callback : mBroadcastCallbacks) {
+                        mReadyForApps = true;
                         callback.onTune(maxPriorityInstance.getTriplet().toString());
                     }
                     return DELIVERY_TYPE_BROADCAST;
@@ -184,16 +253,17 @@ public class DvbIClient {
         boolean ret = false;
         if (mLastDiscoveryTask == null) {
             mLastDiscoveryTask = new ServiceListDiscoveryTask();
-          //  mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/example.xml?ts=1689243059951");
+            //mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/example.xml?ts=1689243059951");
             mLastDiscoveryTask.execute("http://192.168.1.145/config.xml");
             //mLastDiscoveryTask.execute("http://192.168.1.145/servicelist.xml");
+            //mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/SofiaTestList.xml?ts=1689686736811"); //+app
             ret = true;
         }
         return ret;
     }
 
     private DvbChannel createChannel(DvbIService service) throws JSONException {
-        DvbIChannel channel = DvbIChannel.createChannel(service, "");
+        DvbIChannelAdapter channel = DvbIChannelAdapter.createChannel(service, "");
         InternalProviderData data = new InternalProviderData();
         data.put("DVB_URI", "");
         data.put("NET_ID", channel.getNid() == null ? "0" : channel.getNid());
@@ -253,10 +323,10 @@ public class DvbIClient {
                     ServiceList serviceList = ServiceList.parseFromXML(responseBuilder.toString(), targetRegion);
 
                     for (DvbIService service : serviceList.services) {
-                        DvbIChannel.createChannel(service,"").printChannelProperties();
+                        DvbIChannelAdapter.createChannel(service,"").printChannelProperties();
                         List<DvbIServiceInstance> instances = service.getInstances();
                         for (DvbIServiceInstance instance : instances) {
-                            DvbIChannel.createChannel(service, instance, "").printChannelProperties();
+                            DvbIChannelAdapter.createChannel(service, instance, "").printChannelProperties();
                         }
                      //   mServices.add(service);
                     }

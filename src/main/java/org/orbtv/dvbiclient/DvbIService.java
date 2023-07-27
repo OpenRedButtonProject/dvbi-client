@@ -666,7 +666,7 @@ class RelatedMaterial {
     }
 }
 
-class DvbIChannel {
+class DvbIChannelAdapter {
     private String channelType;
     private String idType;
     private int onid;
@@ -680,9 +680,11 @@ class DvbIChannel {
     private String terminalChannel;
     private DvbIService parentService;
     private List<DvbIServiceInstance> serviceInstances = new ArrayList<>();
+    private List<String> appParallelUri;
+    private List<String> appControlUri;
 
-    public static DvbIChannel createChannel(DvbIService service, String preferredLanguage) {
-        DvbIChannel channel = new DvbIChannel();
+    public static DvbIChannelAdapter createChannel(DvbIService service, String preferredLanguage) {
+        DvbIChannelAdapter channel = new DvbIChannelAdapter();
         channel.channelType = determineChannelType(service);
         channel.idType = determineIdType(service);
         channel.onid = determineOnid(service);
@@ -696,11 +698,13 @@ class DvbIChannel {
         channel.terminalChannel = determineTerminalChannel(service);
         channel.serviceInstances = service.getInstances();
         channel.parentService = null;
+        channel.appParallelUri = determineApps(service, "1.1");
+        channel.appControlUri = determineApps(service, "1.2");
         return channel;
     }
 
-    public static DvbIChannel createChannel(DvbIService parentService, DvbIServiceInstance instance, String preferredLanguage) {
-        DvbIChannel channel = new DvbIChannel();
+    public static DvbIChannelAdapter createChannel(DvbIService parentService, DvbIServiceInstance instance, String preferredLanguage) {
+        DvbIChannelAdapter channel = new DvbIChannelAdapter();
         channel.channelType = determineChannelType(parentService);
         channel.idType = determineIdType(instance);
         channel.onid = determineOnid(instance);
@@ -714,7 +718,47 @@ class DvbIChannel {
         channel.terminalChannel = determineTerminalChannel(instance);
         channel.serviceInstances = null;
         channel.parentService = parentService;
+        channel.appParallelUri = determineApps(instance, "1.1");
+        channel.appControlUri = determineApps(instance, "1.2");
         return channel;
+    }
+
+    private static List<String> determineApps(DvbIService service, String appType) {
+        List<RelatedMaterial> relatedMaterials = service.getRelatedMaterials();
+        List<String> uris = new ArrayList<>();
+        for (RelatedMaterial relatedMaterial : relatedMaterials) {
+            String howRelatedHref = relatedMaterial.getHowRelatedHref();
+            String mediaLocatorContentType = relatedMaterial.getMediaLocatorContentType();
+            String howRelatedTermID = relatedMaterial.getHowRelatedTermID();
+            if (howRelatedHref != null && mediaLocatorContentType != null &&
+                   howRelatedHref.startsWith("urn:dvb:metadata:cs:LinkedApplicationCS:2019") &&
+                   relatedMaterial.isXmlAitContentType() && appType.equals(howRelatedTermID)) {
+                String xmlUri = relatedMaterial.getMediaLocatorUri();
+                if (xmlUri != null && !xmlUri.isEmpty()) {
+                    uris.add(xmlUri);
+                }
+            }
+        }
+        return uris;
+    }
+
+    private static List<String> determineApps(DvbIServiceInstance instance, String appType) {
+        List<RelatedMaterial> relatedMaterials = instance.getRelatedMaterials();
+        List<String> uris = new ArrayList<>();
+        for (RelatedMaterial relatedMaterial : relatedMaterials) {
+            String howRelatedHref = relatedMaterial.getHowRelatedHref();
+            String mediaLocatorContentType = relatedMaterial.getMediaLocatorContentType();
+            String howRelatedTermID = relatedMaterial.getHowRelatedTermID();
+            if (howRelatedHref != null && mediaLocatorContentType != null &&
+                   howRelatedHref.startsWith("urn:dvb:metadata:cs:LinkedApplicationCS:2019") &&
+                   relatedMaterial.isXmlAitContentType() && appType.equals(howRelatedTermID)) {
+                String xmlUri = relatedMaterial.getMediaLocatorUri();
+                if (xmlUri != null && !xmlUri.isEmpty()) {
+                    uris.add(xmlUri);
+                }
+            }
+        }
+        return uris;
     }
 
     private static String determineChannelType(DvbIService service) {
@@ -936,6 +980,14 @@ class DvbIChannel {
 
     public DvbIService getParentService() {
         return parentService;
+    }
+
+    public List<String> getAppParallelUris () {
+        return appParallelUri;
+    }
+
+    public List<String> getAppControlUris () {
+        return appControlUri;
     }
 
     public void printChannelProperties() {
