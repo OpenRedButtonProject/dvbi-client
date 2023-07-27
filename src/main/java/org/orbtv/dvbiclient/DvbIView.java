@@ -19,6 +19,7 @@ public class DvbIView extends WebView {
     private final Context mContext;
     private String mLastUrl = "about:blank";
     private Boolean mPageLoaded = false;
+    private Boolean mIsSuspended = false;
 
     private final ArrayList<JSCallback> mJSCallbacks = new ArrayList<>();
 
@@ -58,9 +59,11 @@ public class DvbIView extends WebView {
             @Override
             public void onPageFinished(WebView view, String url) {
                 Log.i(TAG, "onPageFinished " + url + "...");
-                synchronized (mPageLoaded) {
-                    evaluateJavascript("orb_loadMedia('" + mLastUrl + "')", null);
-                    mPageLoaded = true;
+                if (!url.equals("about:blank")) {
+                    synchronized (mPageLoaded) {
+                        evaluateJavascript("orb_loadMedia('" + mLastUrl + "')", null);
+                        mPageLoaded = true;
+                    }
                 }
             }
 
@@ -83,18 +86,20 @@ public class DvbIView extends WebView {
 
     public boolean tune(String url) {
         Log.i(TAG, "Tuning to url " + url + "...");
-        if (url.startsWith("http")) {
+        if (url != null && url.startsWith("http")) {
+            mLastUrl = url;
+            JSONObject data = new JSONObject();
+            for (JSCallback handler : mJSCallbacks) {
+                handler.onVideoEvent("DVBI_PLAYBACK_STARTED", data);
+            }
             mContext.getMainExecutor().execute(() -> {
                 synchronized (mPageLoaded) {
-                    mLastUrl = url;
-                    JSONObject data = new JSONObject();
-                    for(JSCallback handler : mJSCallbacks) {
-                        handler.onVideoEvent("DVBI_PLAYBACK_STARTED", data);
-                    }
                     if (!DVBI_PAGE.equals(this.getUrl())) {
                         mPageLoaded = false;
-                        this.setVisibility(View.VISIBLE);
                         this.loadUrl(DVBI_PAGE);
+                        if (!mIsSuspended) {
+                            this.setVisibility(View.VISIBLE);
+                        }
                     } else if (mPageLoaded) {
                         evaluateJavascript("orb_loadMedia('" + mLastUrl + "')", null);
                     }
@@ -109,12 +114,28 @@ public class DvbIView extends WebView {
         Log.i(TAG, "Tuning off...");
         mContext.getMainExecutor().execute(() -> {
             synchronized (mPageLoaded) {
-                mLastUrl = "about:blank";
                 mPageLoaded = false;
                 this.setVisibility(View.INVISIBLE);
                 this.loadUrl("about:blank");
             }
         });
+    }
+
+    public void setPresentationSuspended(boolean suspend) {
+        synchronized (mIsSuspended) {
+            if (mIsSuspended != suspend) {
+                mIsSuspended = suspend;
+                mContext.getMainExecutor().execute(() -> {
+                    if (suspend) {
+                        this.setVisibility(View.INVISIBLE);
+                        this.onPause();
+                    } else if (mPageLoaded) {
+                        this.onResume();
+                        this.setVisibility(View.VISIBLE);
+                    }
+                });
+            }
+        }
     }
 
     public interface JSCallback {

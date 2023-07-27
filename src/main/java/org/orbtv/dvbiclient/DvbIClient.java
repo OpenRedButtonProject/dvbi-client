@@ -232,7 +232,12 @@ public class DvbIClient {
     }
 
     public void tuneOff() {
+        mLastService = null;
         mDvbIView.tuneOff();
+    }
+
+    public void setPresentationSuspended(boolean suspend) {
+        mDvbIView.setPresentationSuspended(suspend);
     }
 
     public List<DvbChannel> getListOfServices() {
