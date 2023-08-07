@@ -192,7 +192,7 @@ public class DvbIClient {
         return mDvbIView;
     }
 
-    public int tune(String uid) {
+    public int tune(String uid, int instanceIndex) {
         mLastService = mDbHandler.getServiceForUID(uid);
         mLastServiceInstace = null;
         mReadyForApps = false;
@@ -200,12 +200,18 @@ public class DvbIClient {
         if (mLastService != null) {
             DvbIServiceInstance maxPriorityInstance = null;
             int maxPriorityIndex = -1;
-            for (int i = 0; i < mLastService.getInstances().size(); i++) {
-                DvbIServiceInstance instance = mLastService.getInstances().get(i);
-                if (maxPriorityInstance == null || maxPriorityInstance.getPriority() < instance.getPriority()) {
-                    maxPriorityInstance = instance;
-                    maxPriorityIndex = i;
+            if (instanceIndex < 0) {
+                for (int i = 0; i < mLastService.getInstances().size(); i++) {
+                    DvbIServiceInstance instance = mLastService.getInstances().get(i);
+                    if (maxPriorityInstance == null || maxPriorityInstance.getPriority() < instance.getPriority()) {
+                        maxPriorityInstance = instance;
+                        maxPriorityIndex = i;
+                    }
                 }
+            }
+            else {
+                maxPriorityIndex = instanceIndex;
+                maxPriorityInstance = mLastService.getInstances().get(instanceIndex);
             }
 
             mLastServiceInstace = maxPriorityInstance;
@@ -248,6 +254,14 @@ public class DvbIClient {
         mDvbIView.setPresentationSuspended(suspend);
     }
 
+    public void setVideoRectangle(int x, int y, int width, int height) {
+        if (mLastServiceInstace != null && mLastServiceInstace.getDeliveryType().equals("dvb-dash")) {
+            for (DvbCallback handler : mDvbCallbacks) {
+                handler.onSetVideoRectangle(x, y, width, height);
+            }
+        }
+    }
+
     public List<DvbChannel> getListOfServices() {
         ArrayList<DvbChannel> ret = new ArrayList<>();
         List<DvbIService> services = mDbHandler.getServices();
@@ -272,7 +286,7 @@ public class DvbIClient {
             mLastDiscoveryTask = new ServiceListDiscoveryTask();
             //mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/example.xml?ts=1689243059951");
             //mLastDiscoveryTask.execute("http://192.168.1.145/config.xml");
-            mLastDiscoveryTask.execute("http://192.168.1.117/servicelist.xml");
+            mLastDiscoveryTask.execute("http://192.168.1.179/servicelist.xml");
             //mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/SofiaTestList.xml?ts=1689686736811"); //+app
             ret = true;
         }
