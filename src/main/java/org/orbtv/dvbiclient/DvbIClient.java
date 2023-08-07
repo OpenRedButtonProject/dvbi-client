@@ -35,9 +35,7 @@ public class DvbIClient {
     public static final String PLAYER_STATUS_ERROR = "DVBI_PLAYBACK_ERROR";
 
     public static final int DELIVERY_TYPE_BROADCAST = 0;
-
     public static final int DELIVERY_TYPE_BROADBAND = 1;
-
     public static final int DELIVERY_TYPE_UNKNOWN = -1;
 
     private static final Map<String, Integer> HBBTV_CHANNEL_STATUS_LOOKUP = new HashMap<String, Integer>() {{
@@ -201,9 +199,12 @@ public class DvbIClient {
         Log.i(TAG, "---------- Tuning to service ----------\n" + mLastService + "\n------------------------------------");
         if (mLastService != null) {
             DvbIServiceInstance maxPriorityInstance = null;
-            for (DvbIServiceInstance instance : mLastService.getInstances()) {
+            int maxPriorityIndex = -1;
+            for (int i = 0; i < mLastService.getInstances().size(); i++) {
+                DvbIServiceInstance instance = mLastService.getInstances().get(i);
                 if (maxPriorityInstance == null || maxPriorityInstance.getPriority() < instance.getPriority()) {
                     maxPriorityInstance = instance;
+                    maxPriorityIndex = i;
                 }
             }
 
@@ -214,14 +215,21 @@ public class DvbIClient {
                 if (maxPriorityInstance.getDeliveryType().equals("dvb-dash")) {
                     if (mDvbIView.tune(uri)) {
                         mReadyForApps = true;
+                        for (HbbTVCallback handler : mHbbTVCallbacks) {
+                            handler.onServiceInstanceChange(maxPriorityIndex);
+                        }
                         return DELIVERY_TYPE_BROADBAND;
                     }
                 }
                 else {
                     mDvbIView.tuneOff();
+                    mReadyForApps = true;
                     for (BroadcastCallback callback : mBroadcastCallbacks) {
-                        mReadyForApps = true;
                         callback.onTune(maxPriorityInstance.getTriplet().toString());
+                    }
+
+                    for (HbbTVCallback handler : mHbbTVCallbacks) {
+                            handler.onServiceInstanceChange(maxPriorityIndex);
                     }
                     return DELIVERY_TYPE_BROADCAST;
                 }
@@ -254,13 +262,17 @@ public class DvbIClient {
         return ret;
     }
 
+    public DvbIService getServiceByUID(String uid) {
+        return mDbHandler.getServiceForUID(uid);
+    }
+
     public boolean startServiceSearch() {
         boolean ret = false;
         if (mLastDiscoveryTask == null) {
             mLastDiscoveryTask = new ServiceListDiscoveryTask();
             //mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/example.xml?ts=1689243059951");
-            mLastDiscoveryTask.execute("http://192.168.1.145/config.xml");
-            //mLastDiscoveryTask.execute("http://192.168.1.145/servicelist.xml");
+            //mLastDiscoveryTask.execute("http://192.168.1.145/config.xml");
+            mLastDiscoveryTask.execute("http://192.168.1.117/servicelist.xml");
             //mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/SofiaTestList.xml?ts=1689686736811"); //+app
             ret = true;
         }

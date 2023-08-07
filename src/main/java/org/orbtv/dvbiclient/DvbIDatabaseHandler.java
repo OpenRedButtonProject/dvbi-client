@@ -12,12 +12,13 @@ import org.json.JSONObject;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     private static final String TAG = DvbIDatabaseHandler.class.getSimpleName();
-    private static final int DB_VERSION = 6;
+    private static final int DB_VERSION = 10;
     private static final String DB_NAME = "dvbi_db";
     private static final String FOREIGN_KEY_PREFIX_SERVICE = "service_";
     private static final String FOREIGN_KEY_PREFIX_INSTANCE = "instance_";
@@ -30,7 +31,6 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     private static final String SERVICES_TABLE = "services";
     private static final String SERVICES_COLUMN_SERVICE_LIST_ID = "service_list_id";
     private static final String SERVICES_COLUMN_UNIQUE_IDENTIFIER = "unique_identifier";
-    private static final String SERVICES_COLUMN_NAME = "name";
     private static final String SERVICES_COLUMN_LCN = "lcn";
     private static final String SERVICES_COLUMN_PROVIDER = "provider";
     private static final String SERVICES_COLUMN_ADDITIONAL_PARAMS = "additional_params";
@@ -52,6 +52,12 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     private static final String RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_URI = "media_locator_uri";
     private static final String RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE = "media_locator_content_type";
 
+
+    private static final String SERVICE_NAMES_TABLE = "service_names";
+    private static final String SERVICE_NAMES_COLUMN_SERVICE_UID = "service_uid";
+    private static final String SERVICE_NAMES_COLUMN_NAME = "name";
+    private static final String SERVICE_NAMES_COLUMN_COUNTRY = "country";
+
     public DvbIDatabaseHandler(Context context) {
         super(context, DB_NAME, null, DB_VERSION);
     }
@@ -67,7 +73,6 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                 + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
                 + SERVICES_COLUMN_SERVICE_LIST_ID + " INTEGER NOT NULL, "
                 + SERVICES_COLUMN_UNIQUE_IDENTIFIER + " TEXT NOT NULL UNIQUE, "
-                + SERVICES_COLUMN_NAME + " TEXT, "
                 + SERVICES_COLUMN_LCN + " TEXT,"
                 + SERVICES_COLUMN_PROVIDER + " TEXT,"
                 + SERVICES_COLUMN_ADDITIONAL_PARAMS + " BLOB)"
@@ -90,6 +95,12 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                 + RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_URI + " TEXT, "
                 + RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE + " TEXT)"
         );
+        db.execSQL("CREATE TABLE " + SERVICE_NAMES_TABLE + " ("
+                + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
+                + SERVICE_NAMES_COLUMN_SERVICE_UID + " TEXT NOT NULL, "
+                + SERVICE_NAMES_COLUMN_NAME + " TEXT, "
+                + SERVICE_NAMES_COLUMN_COUNTRY + " TEXT)"
+        );
 
         // TODO: remove block
         ContentValues values = new ContentValues();
@@ -105,6 +116,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
         db.execSQL("DROP TABLE IF EXISTS " + SERVICES_TABLE);
         db.execSQL("DROP TABLE IF EXISTS " + SERVICE_LISTS_TABLE);
         db.execSQL("DROP TABLE IF EXISTS " + RELATED_MATERIALS_TABLE);
+        db.execSQL("DROP TABLE IF EXISTS " + SERVICE_NAMES_TABLE);
         // TODO: delete dvbi services from the android channel database
         onCreate(db);
     }
@@ -112,7 +124,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     public synchronized List<DvbIService> getServices() {
         ArrayList<DvbIService> ret = new ArrayList<>();
         SQLiteDatabase db = getReadableDatabase();
-        String[] projection = { SERVICES_COLUMN_NAME, SERVICES_COLUMN_PROVIDER, SERVICES_COLUMN_UNIQUE_IDENTIFIER,
+        String[] projection = { SERVICES_COLUMN_PROVIDER, SERVICES_COLUMN_UNIQUE_IDENTIFIER,
                 SERVICES_COLUMN_LCN, SERVICES_COLUMN_ADDITIONAL_PARAMS };
         Cursor cursor = null;
         try
@@ -124,7 +136,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                 {
                     Triplet triplet = null;
                     try {
-                        String dvbUri = new JSONObject(new String(cursor.getBlob(4))).getString("hbbtv-i:DVBTriplet");
+                        String dvbUri = new JSONObject(new String(cursor.getBlob(3))).getString("hbbtv-i:DVBTriplet");
                         if (dvbUri != null) {
                             triplet = new Triplet(dvbUri);
                         }
@@ -133,10 +145,10 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                     catch (Exception e) {
                         e.printStackTrace();
                     }
-                    ret.add(new DvbIService(cursor.getString(0), cursor.getString(1),
-                            cursor.getString(2), null, cursor.getString(3), triplet,
-                            getServiceInstancesForUID(db, cursor.getString(2)),
-                            getRelatedMaterials(db, FOREIGN_KEY_PREFIX_SERVICE + cursor.getString(2))));
+                    ret.add(new DvbIService(getServiceNamesForUID(db, cursor.getString(1)), cursor.getString(0),
+                            cursor.getString(1), null, cursor.getString(2), triplet,
+                            getServiceInstancesForUID(db, cursor.getString(1)),
+                            getRelatedMaterials(db, FOREIGN_KEY_PREFIX_SERVICE + cursor.getString(1))));
                 }
             }
         }
@@ -153,7 +165,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     public synchronized DvbIService getServiceForUID(String uid) {
         DvbIService service = null;
         SQLiteDatabase db = getReadableDatabase();
-        String[] projection = { SERVICES_COLUMN_NAME, SERVICES_COLUMN_PROVIDER, SERVICES_COLUMN_UNIQUE_IDENTIFIER, SERVICES_COLUMN_LCN, SERVICES_COLUMN_ADDITIONAL_PARAMS };
+        String[] projection = { SERVICES_COLUMN_PROVIDER, SERVICES_COLUMN_UNIQUE_IDENTIFIER, SERVICES_COLUMN_LCN, SERVICES_COLUMN_ADDITIONAL_PARAMS };
         Cursor cursor = null;
         try
         {
@@ -164,16 +176,16 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
             {
                 Triplet triplet = null;
                 try {
-                    String dvbUri = new JSONObject(new String(cursor.getBlob(4))).getString("hbbtv-i:DVBTriplet");
+                    String dvbUri = new JSONObject(new String(cursor.getBlob(3))).getString("hbbtv-i:DVBTriplet");
                     if (dvbUri != null) {
                         triplet = new Triplet(dvbUri);
                     }
                 }
                 catch (Exception e) { }
-                service = new DvbIService(cursor.getString(0), cursor.getString(1),
-                        cursor.getString(2), null, cursor.getString(3), triplet,
-                        getServiceInstancesForUID(db, cursor.getString(2)),
-                        getRelatedMaterials(db, FOREIGN_KEY_PREFIX_SERVICE + cursor.getString(2)));
+                service = new DvbIService(getServiceNamesForUID(db, cursor.getString(1)), cursor.getString(0),
+                        cursor.getString(1), null, cursor.getString(2), triplet,
+                        getServiceInstancesForUID(db, cursor.getString(1)),
+                        getRelatedMaterials(db, FOREIGN_KEY_PREFIX_SERVICE + cursor.getString(1)));
             }
         }
         finally
@@ -203,6 +215,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
             Log.i(TAG, "Deleting service and instances with UIDs not in " + uids);
             db.delete(SERVICES_TABLE, SERVICES_COLUMN_UNIQUE_IDENTIFIER + " NOT IN (" + uids + ")", null);
             db.delete(SERVICE_INSTANCES_TABLE, SERVICE_INSTANCES_COLUMN_SERVICE_UID + " NOT IN (" + uids + ")", null);
+            db.delete(SERVICE_NAMES_TABLE, SERVICE_NAMES_COLUMN_SERVICE_UID + " NOT IN (" + uids + ")", null);
             // TODO: delete related materials for non-existent services/instances
         }
     }
@@ -212,7 +225,6 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
         ContentValues values = new ContentValues();
         JSONObject params = new JSONObject();
         values.put(SERVICES_COLUMN_SERVICE_LIST_ID, 1);
-        values.put(SERVICES_COLUMN_NAME, "My DVB-I service");
         values.put(SERVICES_COLUMN_PROVIDER, service.getProviderName());
         values.put(SERVICES_COLUMN_UNIQUE_IDENTIFIER, uid);
         values.put(SERVICES_COLUMN_LCN, service.getLCNNumber());
@@ -234,6 +246,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
         }
 
         updateRelatedMaterials(db, FOREIGN_KEY_PREFIX_SERVICE + uid, service.getRelatedMaterials());
+        updateServiceNames(db, uid, service.getServiceNames());
 
         List<DvbIServiceInstance> instances = service.getInstances();
         for (int i = 0; i < instances.size(); ++i) {
@@ -350,5 +363,42 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
             }
         }
         return instances;
+    }
+
+    private void updateServiceNames(SQLiteDatabase db, String uid, Map<String, String> names) {
+        db.delete(SERVICE_NAMES_TABLE, SERVICE_NAMES_COLUMN_SERVICE_UID + " = '" + uid + "'", null);
+        for (Map.Entry<String, String> entry : names.entrySet()) {
+            ContentValues values = new ContentValues();
+            values.put(SERVICE_NAMES_COLUMN_SERVICE_UID, uid);
+            values.put(SERVICE_NAMES_COLUMN_COUNTRY, entry.getKey());
+            values.put(SERVICE_NAMES_COLUMN_NAME, entry.getValue());
+            db.insert(SERVICE_NAMES_TABLE, null, values);
+        }
+    }
+
+    private Map<String, String> getServiceNamesForUID(SQLiteDatabase db, String uid) {
+        Map<String, String> names = new HashMap<>();
+        String[] projection = { SERVICE_NAMES_COLUMN_COUNTRY, SERVICE_NAMES_COLUMN_NAME };
+        Cursor cursor = null;
+        try
+        {
+            cursor = db.query(SERVICE_NAMES_TABLE, projection,
+                    SERVICE_NAMES_COLUMN_SERVICE_UID + "='" + uid + "'",
+                    null, null, null, null);
+            if (cursor != null)
+            {
+                while (cursor.moveToNext()) {
+                    names.put(cursor.getString(0), cursor.getString(1));
+                }
+            }
+        }
+        finally
+        {
+            if (cursor != null)
+            {
+                cursor.close();
+            }
+        }
+        return names;
     }
 }
