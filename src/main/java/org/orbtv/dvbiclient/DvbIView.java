@@ -51,6 +51,8 @@ public class DvbIView extends WebView {
         setBackgroundColor(Color.TRANSPARENT);
         getSettings().setJavaScriptEnabled(true);
         getSettings().setMediaPlaybackRequiresUserGesture(false);
+        getSettings().setUseWideViewPort(true);
+        getSettings().setLoadWithOverviewMode(true);
 
         final JavaScriptInterface jsInterface = new JavaScriptInterface(mContext);
         addJavascriptInterface(jsInterface, "Android");
@@ -71,6 +73,7 @@ public class DvbIView extends WebView {
             public void onScaleChanged(WebView view, float oldScale, float newScale) {
                 DvbIView.this.setInitialScale((int) (DvbIView.this.getHeight() / 720.0 * 100.0));
             }
+
         });
     }
 
@@ -118,6 +121,13 @@ public class DvbIView extends WebView {
                 this.setVisibility(View.INVISIBLE);
                 this.loadUrl("about:blank");
             }
+        });
+    }
+
+    public void setVideoRectangle(int x, int y, int width, int height) {
+        mContext.getMainExecutor().execute(() -> {
+            evaluateJavascript("setVideoRectangle(" + x + "," + y + ","
+                    + width + "," + height + ")", null);
         });
     }
 

@@ -256,6 +256,8 @@ public class DvbIClient {
 
     public void setVideoRectangle(int x, int y, int width, int height) {
         if (mLastServiceInstace != null && mLastServiceInstace.getDeliveryType().equals("dvb-dash")) {
+            Log.i(TAG, "Setting video rectangle to " + x + ", " + y + ", " + width + ", " + height);
+            mDvbIView.setVideoRectangle(x, y, width, height);
             for (DvbCallback handler : mDvbCallbacks) {
                 handler.onSetVideoRectangle(x, y, width, height);
             }
