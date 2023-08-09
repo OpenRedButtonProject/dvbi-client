@@ -287,8 +287,8 @@ public class DvbIClient {
         if (mLastDiscoveryTask == null) {
             mLastDiscoveryTask = new ServiceListDiscoveryTask();
             //mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/example.xml?ts=1689243059951");
-            //mLastDiscoveryTask.execute("http://192.168.1.145/config.xml");
-            mLastDiscoveryTask.execute("http://192.168.1.179/servicelist.xml");
+            mLastDiscoveryTask.execute("http://192.168.10.200/servicelist.xml");
+            //mLastDiscoveryTask.execute("http://192.168.1.179/servicelist.xml");
             //mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/SofiaTestList.xml?ts=1689686736811"); //+app
             ret = true;
         }
