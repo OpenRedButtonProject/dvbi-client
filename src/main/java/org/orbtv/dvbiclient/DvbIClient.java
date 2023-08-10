@@ -307,7 +307,7 @@ public class DvbIClient {
             .setDisplayName(channel.getName())
             .setDisplayNumber(channel.getMajorChannel())
             .setType(TYPE_DVB_I)
-            .setServiceType(TvContract.Channels.SERVICE_TYPE_AUDIO_VIDEO)
+            .setServiceType(channel.getChannelType())
             .setOriginalNetworkId(channel.getOnid())
             .setTransportStreamId(channel.getTsid())
             .setServiceId(channel.getSid())
@@ -356,10 +356,10 @@ public class DvbIClient {
                     ServiceList serviceList = ServiceList.parseFromXML(responseBuilder.toString(), targetRegion);
 
                     for (DvbIService service : serviceList.services) {
-                        DvbIChannelAdapter.createChannel(service,"").printChannelProperties();
+                        Log.d(TAG, "--------- scanned service ----------\n" + DvbIChannelAdapter.createChannel(service,""));
                         List<DvbIServiceInstance> instances = service.getInstances();
                         for (DvbIServiceInstance instance : instances) {
-                            DvbIChannelAdapter.createChannel(service, instance, "").printChannelProperties();
+                            Log.d(TAG, "--------- scanned instance ----------\n" + DvbIChannelAdapter.createChannel(service, instance, ""));
                         }
                      //   mServices.add(service);
                     }

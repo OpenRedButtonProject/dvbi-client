@@ -1,5 +1,7 @@
 package org.orbtv.dvbiclient;
 
+import android.media.tv.TvContract;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -105,18 +107,22 @@ public class DvbIChannelAdapter {
         String serviceType = service.getServiceType();
 
         if (serviceType == null || "urn:dvb:metadata:cs:ServiceTypeCS:2019:linear".equals(serviceType)) {
-            return "TYPE_TV";
+            return TvContract.Channels.SERVICE_TYPE_AUDIO_VIDEO;
+            //return "TYPE_TV";
         } else if ("urn:dvb:metadata:cs:ServiceTypeCS:2019:linear-radio".equals(serviceType)) {
-            return "TYPE_RADIO";
+            return TvContract.Channels.SERVICE_TYPE_AUDIO;
+            //return "TYPE_RADIO";
         } else if ("urn:dvb:metadata:cs:ServiceTypeCS:2019:data".equals(serviceType)) {
             List<RelatedMaterial> relatedMaterials = service.getRelatedMaterials();
             for (RelatedMaterial relatedMaterial : relatedMaterials) {
                 if (isHbbtvData(relatedMaterial)) {
-                    return "TYPE_HBBTV_DATA";
+                    //return "TYPE_HBBTV_DATA";
+                    return "SERVICE_TYPE_DATA";
                 }
             }
         }
-        return "TYPE_OTHER";
+        return TvContract.Channels.SERVICE_TYPE_OTHER;
+        //return "TYPE_OTHER";
     }
 
     private static boolean isHbbtvData(RelatedMaterial relatedMaterial) {
@@ -343,8 +349,9 @@ public class DvbIChannelAdapter {
         return appControlUri;
     }
 
-    public void printChannelProperties() {
-        System.out.println("--------------------------------");
+    @Override
+    public String toString() {
+        String ret = "";
         Map<String, String> properties = new LinkedHashMap<>();
         properties.put("Channel Type", channelType);
         properties.put("Id Type", idType);
@@ -362,14 +369,14 @@ public class DvbIChannelAdapter {
             String propertyName = entry.getKey();
             String propertyValue = entry.getValue();
             if (propertyValue != null && !propertyValue.isEmpty()) {
-                System.out.println(propertyName + ": " + propertyValue);
+                ret += propertyName + ": " + propertyValue + "\n";
             }
         }
 
         if (serviceInstances != null) {
             int numInstances = serviceInstances.size();
-            System.out.println("Number of Instances: " + numInstances);
-            System.out.println("--------------------------------");
+            ret += "Number of Instances: " + numInstances;
         }
+        return ret;
     }
 }

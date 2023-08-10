@@ -18,7 +18,7 @@ import java.util.Map;
 
 public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     private static final String TAG = DvbIDatabaseHandler.class.getSimpleName();
-    private static final int DB_VERSION = 10;
+    private static final int DB_VERSION = 12;
     private static final String DB_NAME = "dvbi_db";
     private static final String FOREIGN_KEY_PREFIX_SERVICE = "service_";
     private static final String FOREIGN_KEY_PREFIX_INSTANCE = "instance_";
@@ -34,6 +34,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     private static final String SERVICES_COLUMN_LCN = "lcn";
     private static final String SERVICES_COLUMN_PROVIDER = "provider";
     private static final String SERVICES_COLUMN_ADDITIONAL_PARAMS = "additional_params";
+    private static final String SERVICES_COLUMN_SERVICE_TYPE = "service_type";
 
     private static final String SERVICE_INSTANCES_TABLE = "service_instances";
     private static final String SERVICE_INSTANCES_COLUMN_SERVICE_UID = "service_uid";
@@ -75,6 +76,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                 + SERVICES_COLUMN_UNIQUE_IDENTIFIER + " TEXT NOT NULL UNIQUE, "
                 + SERVICES_COLUMN_LCN + " TEXT,"
                 + SERVICES_COLUMN_PROVIDER + " TEXT,"
+                + SERVICES_COLUMN_SERVICE_TYPE + " TEXT,"
                 + SERVICES_COLUMN_ADDITIONAL_PARAMS + " BLOB)"
         );
         db.execSQL("CREATE TABLE " + SERVICE_INSTANCES_TABLE + " ("
@@ -125,7 +127,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
         ArrayList<DvbIService> ret = new ArrayList<>();
         SQLiteDatabase db = getReadableDatabase();
         String[] projection = { SERVICES_COLUMN_PROVIDER, SERVICES_COLUMN_UNIQUE_IDENTIFIER,
-                SERVICES_COLUMN_LCN, SERVICES_COLUMN_ADDITIONAL_PARAMS };
+                SERVICES_COLUMN_LCN, SERVICES_COLUMN_ADDITIONAL_PARAMS, SERVICES_COLUMN_SERVICE_TYPE };
         Cursor cursor = null;
         try
         {
@@ -146,7 +148,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                         e.printStackTrace();
                     }
                     ret.add(new DvbIService(getServiceNamesForUID(db, cursor.getString(1)), cursor.getString(0),
-                            cursor.getString(1), null, cursor.getString(2), triplet,
+                            cursor.getString(1), cursor.getString(4), cursor.getString(2), triplet,
                             getServiceInstancesForUID(db, cursor.getString(1)),
                             getRelatedMaterials(db, FOREIGN_KEY_PREFIX_SERVICE + cursor.getString(1))));
                 }
@@ -165,7 +167,8 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     public synchronized DvbIService getServiceForUID(String uid) {
         DvbIService service = null;
         SQLiteDatabase db = getReadableDatabase();
-        String[] projection = { SERVICES_COLUMN_PROVIDER, SERVICES_COLUMN_UNIQUE_IDENTIFIER, SERVICES_COLUMN_LCN, SERVICES_COLUMN_ADDITIONAL_PARAMS };
+        String[] projection = { SERVICES_COLUMN_PROVIDER, SERVICES_COLUMN_UNIQUE_IDENTIFIER,
+                SERVICES_COLUMN_LCN, SERVICES_COLUMN_ADDITIONAL_PARAMS, SERVICES_COLUMN_SERVICE_TYPE };
         Cursor cursor = null;
         try
         {
@@ -183,7 +186,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                 }
                 catch (Exception e) { }
                 service = new DvbIService(getServiceNamesForUID(db, cursor.getString(1)), cursor.getString(0),
-                        cursor.getString(1), null, cursor.getString(2), triplet,
+                        cursor.getString(1), cursor.getString(4), cursor.getString(2), triplet,
                         getServiceInstancesForUID(db, cursor.getString(1)),
                         getRelatedMaterials(db, FOREIGN_KEY_PREFIX_SERVICE + cursor.getString(1)));
             }
@@ -228,6 +231,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
         values.put(SERVICES_COLUMN_PROVIDER, service.getProviderName());
         values.put(SERVICES_COLUMN_UNIQUE_IDENTIFIER, uid);
         values.put(SERVICES_COLUMN_LCN, service.getLCNNumber());
+        values.put(SERVICES_COLUMN_SERVICE_TYPE, service.getServiceType());
         if (service.getTriplet() != null) {
             try {
                 params.put("hbbtv-i:DVBTriplet", service.getTriplet());
