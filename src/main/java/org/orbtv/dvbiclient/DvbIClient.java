@@ -36,6 +36,7 @@ public class DvbIClient {
 
     public static final int DELIVERY_TYPE_BROADCAST = 0;
     public static final int DELIVERY_TYPE_BROADBAND = 1;
+    public static final int DELIVERY_TYPE_DATA = 2;
     public static final int DELIVERY_TYPE_UNKNOWN = -1;
 
     private static final Map<String, Integer> HBBTV_CHANNEL_STATUS_LOOKUP = new HashMap<String, Integer>() {{
@@ -84,13 +85,9 @@ public class DvbIClient {
                 }
                 Log.i(TAG, "Received video event " + eventName);
 
-                if (mReadyForApps && eventName.equals(PLAYER_STATUS_PLAYING)) {
-                    List<String> appUri;
-                    if (processXmlAitCallback != null) {
-                        appUri = DvbIChannelAdapter.createChannel(mLastService, mLastServiceInstace, "").getAppParallelUris();
-                        if (appUri.isEmpty()) {
-                            appUri = DvbIChannelAdapter.createChannel(mLastService, "").getAppParallelUris();
-                        }
+                if (mReadyForApps && eventName.equals(PLAYER_STATUS_PLAYING) && processXmlAitCallback != null) {
+                    List<String> appUri = DvbIChannelAdapter.createChannel(mLastService, mLastServiceInstace, "").getAppParallelUris();
+                    if (!appUri.isEmpty()) {
                         Log.i(TAG, "Found Hbbtv App from Related Materials (" + appUri + ")");
                         new GetXmlAitTask().execute(appUri.get(0));
                     }
@@ -218,26 +215,45 @@ public class DvbIClient {
             if (maxPriorityInstance != null) {
                 String uri = maxPriorityInstance.getUri();
                 Log.i(TAG, "Max priority instance of type " + maxPriorityInstance.getDeliveryType());
-                if (maxPriorityInstance.getDeliveryType().equals("dvb-dash")) {
-                    if (mDvbIView.tune(uri)) {
+
+                DvbIChannelAdapter channel = DvbIChannelAdapter.createChannel(mLastService, mLastServiceInstace, "");
+                Log.i(TAG, "---------- channel info ----------\n" + channel + "\n------------------------------------");
+                if (channel.getAppControlUris().isEmpty()) {
+                    if (maxPriorityInstance.getDeliveryType().equals("dvb-dash")) {
+                        if (mDvbIView.tune(uri)) {
+                            mReadyForApps = true;
+                            for (HbbTVCallback handler : mHbbTVCallbacks) {
+                                handler.onServiceInstanceChange(maxPriorityIndex);
+                            }
+                            return DELIVERY_TYPE_BROADBAND;
+                        }
+                    } else {
+                        mDvbIView.tuneOff();
                         mReadyForApps = true;
+                        for (BroadcastCallback callback : mBroadcastCallbacks) {
+                            callback.onTune(maxPriorityInstance.getTriplet().toString());
+                        }
+
                         for (HbbTVCallback handler : mHbbTVCallbacks) {
                             handler.onServiceInstanceChange(maxPriorityIndex);
                         }
-                        return DELIVERY_TYPE_BROADBAND;
+                        return DELIVERY_TYPE_BROADCAST;
                     }
                 }
                 else {
                     mDvbIView.tuneOff();
-                    mReadyForApps = true;
-                    for (BroadcastCallback callback : mBroadcastCallbacks) {
-                        callback.onTune(maxPriorityInstance.getTriplet().toString());
+                    for (HbbTVCallback handler : mHbbTVCallbacks) {
+                        handler.onChannelChangeStatus(channel.getOnid(), channel.getTsid(), channel.getSid(), HBBTV_CHANNEL_STATUS_LOOKUP.get(PLAYER_STATUS_STARTING));
+                        handler.onChannelChangeStatus(channel.getOnid(), channel.getTsid(), channel.getSid(), HBBTV_CHANNEL_STATUS_LOOKUP.get(PLAYER_STATUS_PLAYING));
+                    }
+                    for (DvbCallback handler : mDvbCallbacks) {
+                        handler.onPlayerStatusChanged(PLAYER_STATUS_STARTING);
+                        handler.onPlayerStatusChanged(PLAYER_STATUS_PLAYING);
                     }
 
-                    for (HbbTVCallback handler : mHbbTVCallbacks) {
-                            handler.onServiceInstanceChange(maxPriorityIndex);
-                    }
-                    return DELIVERY_TYPE_BROADCAST;
+                    Log.i(TAG, "Found Hbbtv App from Related Materials (" + channel.getAppControlUris().get(0) + ")");
+                    new GetXmlAitTask().execute(channel.getAppControlUris().get(0));
+                    return DELIVERY_TYPE_DATA;
                 }
             }
         }
@@ -247,6 +263,7 @@ public class DvbIClient {
 
     public void tuneOff() {
         mLastService = null;
+        mLastServiceInstace = null;
         mDvbIView.tuneOff();
     }
 
@@ -284,16 +301,16 @@ public class DvbIClient {
 
     public boolean startServiceSearch(String serviceListURL) {
         boolean ret = false;
-        if (mLastDiscoveryTask == null) {
-            mLastDiscoveryTask = new ServiceListDiscoveryTask();
+        if (mLastDiscoveryTask == null) {mLastDiscoveryTask = new ServiceListDiscoveryTask();
             if (serviceListURL == null || serviceListURL.isEmpty()) {
-                //mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/example.xml?ts=1689243059951");
-                //mLastDiscoveryTask.execute("http://192.168.1.145/config.xml");
-                mLastDiscoveryTask.execute("http://192.168.1.179/servicelist.xml");
-                //mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/SofiaTestList.xml?ts=1689686736811"); //+app
-            } else {
-                 mLastDiscoveryTask.execute(serviceListURL);
+                serviceListURL = "http://192.168.1.179/servicelist.xml";
             }
+            mLastDiscoveryTask = new ServiceListDiscoveryTask();
+            Log.d(TAG, "Starting service search at " + serviceListURL);
+            //mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/example.xml?ts=1689243059951");
+            //mLastDiscoveryTask.execute("http://192.168.1.145/config.xml");
+            //mLastDiscoveryTask.execute("http://stage.sofiadigital.fi/dvb/dvb-i-reference-application/backend/servicelists/SofiaTestList.xml?ts=1689686736811"); //+app
+            mLastDiscoveryTask.execute(serviceListURL);
             ret = true;
         }
         return ret;
@@ -360,12 +377,7 @@ public class DvbIClient {
                     ServiceList serviceList = ServiceList.parseFromXML(responseBuilder.toString(), targetRegion);
 
                     for (DvbIService service : serviceList.services) {
-                        Log.d(TAG, "--------- scanned service ----------\n" + DvbIChannelAdapter.createChannel(service,""));
-                        List<DvbIServiceInstance> instances = service.getInstances();
-                        for (DvbIServiceInstance instance : instances) {
-                            Log.d(TAG, "--------- scanned instance ----------\n" + DvbIChannelAdapter.createChannel(service, instance, ""));
-                        }
-                     //   mServices.add(service);
+                        Log.d(TAG, "--------- scanned service ----------\n" + service);
                     }
                     mDbHandler.updateServices(serviceList.services);
 

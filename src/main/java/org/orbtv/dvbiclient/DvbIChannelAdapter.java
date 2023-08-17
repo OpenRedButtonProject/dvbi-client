@@ -60,8 +60,8 @@ public class DvbIChannelAdapter {
         channel.terminalChannel = determineTerminalChannel(instance);
         channel.serviceInstances = null;
         channel.parentService = parentService;
-        channel.appParallelUri = determineApps(instance, "1.1");
-        channel.appControlUri = determineApps(instance, "1.2");
+        channel.appParallelUri = determineApps(instance, parentService, "1.1");
+        channel.appControlUri = determineApps(instance, parentService, "1.2");
         return channel;
     }
 
@@ -84,7 +84,7 @@ public class DvbIChannelAdapter {
         return uris;
     }
 
-    private static List<String> determineApps(DvbIServiceInstance instance, String appType) {
+    private static List<String> determineApps(DvbIServiceInstance instance, DvbIService parentService, String appType) {
         List<RelatedMaterial> relatedMaterials = instance.getRelatedMaterials();
         List<String> uris = new ArrayList<>();
         for (RelatedMaterial relatedMaterial : relatedMaterials) {
@@ -100,6 +100,11 @@ public class DvbIChannelAdapter {
                 }
             }
         }
+
+        if (uris.isEmpty()) {
+            uris = determineApps(parentService, appType);
+        }
+
         return uris;
     }
 
@@ -351,31 +356,21 @@ public class DvbIChannelAdapter {
 
     @Override
     public String toString() {
-        String ret = "";
-        Map<String, String> properties = new LinkedHashMap<>();
-        properties.put("Channel Type", channelType);
-        properties.put("Id Type", idType);
-        properties.put("ONID", String.format(Locale.ENGLISH, "%d", onid));
-        properties.put("NID", nid);
-        properties.put("TSID", String.format(Locale.ENGLISH, "%d", tsid));
-        properties.put("SID", String.format(Locale.ENGLISH, "%d", sid));
-        properties.put("Name", name);
-        properties.put("Major Channel", majorChannel);
-        properties.put("DSD", dsd);
-        properties.put("IP Broadcast ID", ipBroadcastID);
-        properties.put("Terminal Channel", terminalChannel);
-
-        for (Map.Entry<String, String> entry : properties.entrySet()) {
-            String propertyName = entry.getKey();
-            String propertyValue = entry.getValue();
-            if (propertyValue != null && !propertyValue.isEmpty()) {
-                ret += propertyName + ": " + propertyValue + "\n";
-            }
-        }
+        String ret = "Channel Type: " + channelType
+            + "\nId Type:" + idType
+            + "\nONID:" + String.format(Locale.ENGLISH, "%d", onid)
+            + "\nNID:" + nid
+            + "\nTSID:" + String.format(Locale.ENGLISH, "%d", tsid)
+            + "\nSID:" + String.format(Locale.ENGLISH, "%d", sid)
+            + "\nName:" + name
+            + "\nMajor Channel:" + majorChannel
+            + "\nDSD:" + dsd
+            + "\nIP Broadcast ID:" + ipBroadcastID
+            + "\nTerminal Channel:" + terminalChannel;
 
         if (serviceInstances != null) {
             int numInstances = serviceInstances.size();
-            ret += "Number of Instances: " + numInstances;
+            ret += "\nNumber of Instances: " + numInstances;
         }
         return ret;
     }
