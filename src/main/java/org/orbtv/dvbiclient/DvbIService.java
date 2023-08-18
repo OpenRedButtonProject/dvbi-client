@@ -333,16 +333,14 @@ class InstanceAvailabilityPeriod {
 
 class RelatedMaterial {
     private String howRelatedHref;
-    private String howRelatedTermID;
     private String mediaLocatorUri;
     private String mediaLocatorContentType;
 
     private RelatedMaterial() { }
 
-    public RelatedMaterial(String howRelatedHref, String howRelatedTermID,
+    public RelatedMaterial(String howRelatedHref,
                            String mediaLocatorUri, String mediaLocatorContentType) {
         this.howRelatedHref = howRelatedHref;
-        this.howRelatedTermID = howRelatedTermID;
         this.mediaLocatorUri = mediaLocatorUri;
         this.mediaLocatorContentType = mediaLocatorContentType;
     }
@@ -355,7 +353,6 @@ class RelatedMaterial {
                 switch (xpp.getName()) {
                     case "HowRelated":
                         relatedMaterial.howRelatedHref = xpp.getAttributeValue(null, "href");
-                        relatedMaterial.howRelatedTermID = extractTermID(xpp.getAttributeValue(null, "href"));
                         break;
                     case "MediaLocator":
                         parseMediaLocator(xpp, relatedMaterial);
@@ -381,31 +378,16 @@ class RelatedMaterial {
         }
     }
 
-    private static String extractTermID(String href) {
-        if (href != null) {
-            int index = href.lastIndexOf(':');
-            if (index != -1) {
-                return href.substring(index + 1);
-            }
-        }
-        return null;
-    }
-
     @Override
     public String toString() {
         return "- " + this.getClass().getSimpleName() + " -\n"
                 + "howRelatedHref: " + this.howRelatedHref + "\n"
-                + "howRelatedTermID: " + this.howRelatedTermID + "\n"
                 + "mediaLocatorContentType: " + this.mediaLocatorContentType + "\n"
                 + "mediaLocatorUri: " + this.mediaLocatorUri;
     }
 
     public String getHowRelatedHref() {
         return howRelatedHref;
-    }
-
-    public String getHowRelatedTermID() {
-        return howRelatedTermID;
     }
 
     public String getMediaLocatorUri() {

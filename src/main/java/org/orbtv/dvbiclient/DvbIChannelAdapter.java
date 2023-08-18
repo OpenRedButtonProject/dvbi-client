@@ -60,8 +60,8 @@ public class DvbIChannelAdapter {
         channel.terminalChannel = determineTerminalChannel(instance);
         channel.serviceInstances = null;
         channel.parentService = parentService;
-        channel.appParallelUri = determineApps(instance, parentService, "1.1");
-        channel.appControlUri = determineApps(instance, parentService, "1.2");
+        channel.appParallelUri = determineApps(instance, parentService, "urn:dvb:metadata:cs:LinkedApplicationCS:2019:1.1");
+        channel.appControlUri = determineApps(instance, parentService, "urn:dvb:metadata:cs:LinkedApplicationCS:2019:1.2");
         return channel;
     }
 
@@ -71,10 +71,8 @@ public class DvbIChannelAdapter {
         for (RelatedMaterial relatedMaterial : relatedMaterials) {
             String howRelatedHref = relatedMaterial.getHowRelatedHref();
             String mediaLocatorContentType = relatedMaterial.getMediaLocatorContentType();
-            String howRelatedTermID = relatedMaterial.getHowRelatedTermID();
             if (howRelatedHref != null && mediaLocatorContentType != null &&
-                    howRelatedHref.startsWith("urn:dvb:metadata:cs:LinkedApplicationCS:2019") &&
-                    relatedMaterial.isXmlAitContentType() && appType.equals(howRelatedTermID)) {
+                    relatedMaterial.isXmlAitContentType() && appType.equals(howRelatedHref)) {
                 String xmlUri = relatedMaterial.getMediaLocatorUri();
                 if (xmlUri != null && !xmlUri.isEmpty()) {
                     uris.add(xmlUri);
@@ -90,10 +88,9 @@ public class DvbIChannelAdapter {
         for (RelatedMaterial relatedMaterial : relatedMaterials) {
             String howRelatedHref = relatedMaterial.getHowRelatedHref();
             String mediaLocatorContentType = relatedMaterial.getMediaLocatorContentType();
-            String howRelatedTermID = relatedMaterial.getHowRelatedTermID();
             if (howRelatedHref != null && mediaLocatorContentType != null &&
                     howRelatedHref.startsWith("urn:dvb:metadata:cs:LinkedApplicationCS:2019") &&
-                    relatedMaterial.isXmlAitContentType() && appType.equals(howRelatedTermID)) {
+                    relatedMaterial.isXmlAitContentType() && appType.equals(howRelatedHref)) {
                 String xmlUri = relatedMaterial.getMediaLocatorUri();
                 if (xmlUri != null && !xmlUri.isEmpty()) {
                     uris.add(xmlUri);

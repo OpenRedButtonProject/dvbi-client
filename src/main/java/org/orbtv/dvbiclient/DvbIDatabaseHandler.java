@@ -18,7 +18,7 @@ import java.util.Map;
 
 public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     private static final String TAG = DvbIDatabaseHandler.class.getSimpleName();
-    private static final int DB_VERSION = 12;
+    private static final int DB_VERSION = 13;
     private static final String DB_NAME = "dvbi_db";
     private static final String FOREIGN_KEY_PREFIX_SERVICE = "service_";
     private static final String FOREIGN_KEY_PREFIX_INSTANCE = "instance_";
@@ -49,7 +49,6 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     private static final String RELATED_MATERIALS_COLUMN_FOREIGN_KEY = "foreign_key";
     private static final String RELATED_MATERIALS_COLUMN_INDEX = "array_index";
     private static final String RELATED_MATERIALS_COLUMN_HOW_RELATED_HREF = "how_related_href";
-    private static final String RELATED_MATERIALS_COLUMN_HOW_RELATED_TERM_ID = "how_related_term_id";
     private static final String RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_URI = "media_locator_uri";
     private static final String RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE = "media_locator_content_type";
 
@@ -93,7 +92,6 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                 + RELATED_MATERIALS_COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
                 + RELATED_MATERIALS_COLUMN_INDEX + " INTEGER NOT NULL, "
                 + RELATED_MATERIALS_COLUMN_HOW_RELATED_HREF + " TEXT, "
-                + RELATED_MATERIALS_COLUMN_HOW_RELATED_TERM_ID + " TEXT, "
                 + RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_URI + " TEXT, "
                 + RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE + " TEXT)"
         );
@@ -293,7 +291,6 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
             values.put(RELATED_MATERIALS_COLUMN_FOREIGN_KEY, foreignKey);
             values.put(RELATED_MATERIALS_COLUMN_INDEX, i);
             values.put(RELATED_MATERIALS_COLUMN_HOW_RELATED_HREF, material.getHowRelatedHref());
-            values.put(RELATED_MATERIALS_COLUMN_HOW_RELATED_TERM_ID, material.getHowRelatedTermID());
             values.put(RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_URI, material.getMediaLocatorUri());
             values.put(RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE, material.getMediaLocatorContentType());
             if (db.update(RELATED_MATERIALS_TABLE, values, RELATED_MATERIALS_COLUMN_FOREIGN_KEY
@@ -311,7 +308,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
 
     private List<RelatedMaterial> getRelatedMaterials(SQLiteDatabase db, String foreignKey) {
         ArrayList<RelatedMaterial> materials = new ArrayList<>();
-        String[] projection = { RELATED_MATERIALS_COLUMN_HOW_RELATED_HREF, RELATED_MATERIALS_COLUMN_HOW_RELATED_TERM_ID,
+        String[] projection = { RELATED_MATERIALS_COLUMN_HOW_RELATED_HREF,
                 RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_URI, RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE };
         Cursor cursor = null;
         try
@@ -321,8 +318,8 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                     null, null, null, RELATED_MATERIALS_COLUMN_INDEX);
             if (cursor != null) {
                 while (cursor.moveToNext()) {
-                    materials.add (new RelatedMaterial(cursor.getString(0), cursor.getString(1),
-                            cursor.getString(2), cursor.getString(3)));
+                    materials.add (new RelatedMaterial(cursor.getString(0),
+                            cursor.getString(1), cursor.getString(2)));
                 }
             }
         }

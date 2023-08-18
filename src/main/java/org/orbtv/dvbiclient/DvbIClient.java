@@ -34,6 +34,9 @@ public class DvbIClient {
     public static final String PLAYER_STATUS_BAD_CONNECTION = "DVBI_PLAYBACK_STALLED";
     public static final String PLAYER_STATUS_ERROR = "DVBI_PLAYBACK_ERROR";
 
+    public static final String LINKED_APP_SCHEME_1_1 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:1.1";
+    public static final String LINKED_APP_SCHEME_1_2 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:1.2";
+
     public static final int DELIVERY_TYPE_BROADCAST = 0;
     public static final int DELIVERY_TYPE_BROADBAND = 1;
     public static final int DELIVERY_TYPE_DATA = 2;
@@ -60,8 +63,19 @@ public class DvbIClient {
     private ProcessXmlAitCallback processXmlAitCallback;
     private Boolean mReadyForApps = false;
 
+    private class XmlAitAttributes {
+        public String xml;
+        public String url;
+        public String scheme;
+
+        public XmlAitAttributes(String url, String scheme) {
+            this.url = url;
+            this.scheme = scheme;
+        }
+    }
+
     public interface ProcessXmlAitCallback {
-        void processXmlAit(String xmlAit);
+        void processXmlAit(String xmlAit, String scheme);
     }
 
     private final DvbIView.JSCallback mJSCallback = new DvbIView.JSCallback() {
@@ -89,23 +103,24 @@ public class DvbIClient {
                     List<String> appUri = DvbIChannelAdapter.createChannel(mLastService, mLastServiceInstace, "").getAppParallelUris();
                     if (!appUri.isEmpty()) {
                         Log.i(TAG, "Found Hbbtv App from Related Materials (" + appUri + ")");
-                        new GetXmlAitTask().execute(appUri.get(0));
+                        new GetXmlAitTask().execute(new XmlAitAttributes(appUri.get(0), LINKED_APP_SCHEME_1_1));
                     }
                 }
             }
         }
     };
 
-    private class GetXmlAitTask extends AsyncUtils<String, String> {
+    private class GetXmlAitTask extends AsyncUtils<XmlAitAttributes, XmlAitAttributes> {
         @Override
-        protected String doInBackground(String... uris) {
-            return getXmlAit(uris[0]);
+        protected XmlAitAttributes doInBackground(XmlAitAttributes... xmlAit) {
+            xmlAit[0].xml = getXmlAit(xmlAit[0].url);
+            return xmlAit[0];
         }
     
         @Override
-        protected void onPostExecute(String result) {
+        protected void onPostExecute(XmlAitAttributes result) {
             if (processXmlAitCallback != null && result != null) {
-                processXmlAitCallback.processXmlAit(result);
+                processXmlAitCallback.processXmlAit(result.xml, result.scheme);
                 mReadyForApps = false;
             }
         }
@@ -252,7 +267,7 @@ public class DvbIClient {
                     }
 
                     Log.i(TAG, "Found Hbbtv App from Related Materials (" + channel.getAppControlUris().get(0) + ")");
-                    new GetXmlAitTask().execute(channel.getAppControlUris().get(0));
+                    new GetXmlAitTask().execute(new XmlAitAttributes(channel.getAppControlUris().get(0), LINKED_APP_SCHEME_1_2));
                     return DELIVERY_TYPE_DATA;
                 }
             }
