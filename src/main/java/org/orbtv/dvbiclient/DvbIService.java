@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.concurrent.TimeUnit;
+import java.util.TimeZone;
 
 class ServiceList {
     List<DvbIService> services;
@@ -273,9 +274,17 @@ public class DvbIService {
 }
 
 class InstanceAvailabilityPeriod {
-    private String startTime;
-    private String endTime;
-    private String days;
+    private List<String> startTimes = new ArrayList<>();
+    private List<String> endTimes = new ArrayList<>();
+    // private String days;
+
+    private InstanceAvailabilityPeriod() { }
+
+    public InstanceAvailabilityPeriod(List<String> startTimes, List<String> endTimes) {
+        this.startTimes = startTimes;
+        this.endTimes = endTimes;
+        // this.days = days;
+    }
 
     public static InstanceAvailabilityPeriod parseFromXML(XmlPullParser xpp) throws Exception {
         InstanceAvailabilityPeriod period = new InstanceAvailabilityPeriod();
@@ -283,15 +292,13 @@ class InstanceAvailabilityPeriod {
         while (!(eventType == XmlPullParser.END_TAG && "Period".equals(xpp.getName()))) {
             if (eventType == XmlPullParser.START_TAG) {
                 switch (xpp.getName()) {
-                    case "startTime":
-                        period.startTime = xpp.nextText();
+                    case "Interval":
+                        period.startTimes.add(xpp.getAttributeValue(null, "startTime"));
+                        period.endTimes.add(xpp.getAttributeValue(null, "endTime"));
                         break;
-                    case "endTime":
-                        period.endTime = xpp.nextText();
-                        break;
-                    case "days":
-                        period.days = xpp.nextText();
-                        break;
+                    // case "days":
+                    //     period.days = xpp.nextText();
+                    //     break;
                 }
             }
             eventType = xpp.next();
@@ -299,25 +306,28 @@ class InstanceAvailabilityPeriod {
         return period;
     }
 
-    public String getStartTime() {
-        return startTime;
+    public List<String> getStartTimes() {
+        return startTimes;
     }
 
-    public String getEndTime() {
-        return endTime;
+    public List<String> getEndTimes() {
+        return endTimes;
     }
 
-    public String getDays() {
-        return days;
-    }
+    // public String getDays() {
+    //     return days;
+    // }
 
-    public long duration() {
+    public long duration(String startTime, String endTime) {
         if (startTime == null || endTime == null || startTime.isEmpty() || endTime.isEmpty()) {
             return 0;
         }
 
         try {
-            SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss");
+            // check spec for supported formats
+            //SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss");
+            SimpleDateFormat format = new SimpleDateFormat("HH:mm:ss'Z'");
+            format.setTimeZone(TimeZone.getTimeZone("UTC"));
             Date startDate = format.parse(startTime);
             Date endDate = format.parse(endTime);
             long durationInMillis = endDate.getTime() - startDate.getTime();
@@ -328,6 +338,18 @@ class InstanceAvailabilityPeriod {
         }
 
         return 0;
+    }
+
+    @Override
+    public String toString() {
+        StringBuilder builder = new StringBuilder();
+        builder.append("- ").append(this.getClass().getSimpleName()).append(" -\n");
+        for (int i = 0; i < startTimes.size(); i++) {
+            builder.append("Start Time: ").append(startTimes.get(i)).append("\n");
+            builder.append("End Time: ").append(endTimes.get(i)).append("\n");
+            builder.append("Duration (minutes): ").append(duration(startTimes.get(i), endTimes.get(i))).append("\n");
+        }
+        return builder.toString();
     }
 }
 

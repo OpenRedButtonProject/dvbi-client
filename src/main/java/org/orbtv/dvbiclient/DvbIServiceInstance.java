@@ -14,7 +14,7 @@ public class DvbIServiceInstance {
     private String displayName;
     private String serviceName;
     private int priority;
-    private List<InstanceAvailabilityPeriod> availabilityPeriods = new ArrayList<>();
+    private InstanceAvailabilityPeriod availabilityPeriods;
     private Triplet triplet;
     private String deliveryType;
     private Map<String, String> deliveryParameters = new HashMap<>();
@@ -23,12 +23,14 @@ public class DvbIServiceInstance {
     private DvbIServiceInstance() {
     }
 
-    public DvbIServiceInstance(String displayName, int priority, String deliveryType, JSONObject deliveryParams, List<RelatedMaterial> relatedMaterials) {
+    public DvbIServiceInstance(String displayName, int priority, String deliveryType, JSONObject deliveryParams, 
+                                    List<RelatedMaterial> relatedMaterials, InstanceAvailabilityPeriod availabilityPeriods) {
         Iterator<String> keys = deliveryParams.keys();
         this.displayName = displayName;
         this.priority = priority;
         this.relatedMaterials = relatedMaterials;
         this.deliveryType = deliveryType;
+        this.availabilityPeriods = availabilityPeriods;
         while (keys.hasNext()) {
             String key = keys.next();
             try {
@@ -56,8 +58,8 @@ public class DvbIServiceInstance {
                         instance.priority = Integer.parseInt(xpp.getAttributeValue(null, "priority"));
                         break;
                     case "Availability":
-                        InstanceAvailabilityPeriod period = InstanceAvailabilityPeriod.parseFromXML(xpp);
-                        instance.availabilityPeriods.add(period);
+                        System.out.println("GEP found availability1 !!!!!!");
+                        instance.availabilityPeriods = InstanceAvailabilityPeriod.parseFromXML(xpp);
                         break;
                     case "RelatedMaterial":
                         RelatedMaterial relatedMaterial = RelatedMaterial.parseFromXML(xpp);
@@ -168,7 +170,7 @@ public class DvbIServiceInstance {
         return priority;
     }
 
-    public List<InstanceAvailabilityPeriod> getAvailabilityPeriods() {
+    public InstanceAvailabilityPeriod getAvailabilityPeriod() {
         return availabilityPeriods;
     }
 

@@ -18,7 +18,7 @@ import java.util.Map;
 
 public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     private static final String TAG = DvbIDatabaseHandler.class.getSimpleName();
-    private static final int DB_VERSION = 13;
+    private static final int DB_VERSION = 14;
     private static final String DB_NAME = "dvbi_db";
     private static final String FOREIGN_KEY_PREFIX_SERVICE = "service_";
     private static final String FOREIGN_KEY_PREFIX_INSTANCE = "instance_";
@@ -52,6 +52,11 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     private static final String RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_URI = "media_locator_uri";
     private static final String RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE = "media_locator_content_type";
 
+    private static final String AVAILABILITY_PERIOD_TABLE = "availability_periods";
+    private static final String AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY = "foreign_key";
+    private static final String AVAILABILITY_PERIOD_COLUMN_INDEX = "array_index";
+    private static final String AVAILABILITY_PERIOD_COLUMN_START_TIME = "start_time";
+    private static final String AVAILABILITY_PERIOD_COLUMN_END_TIME = "end_time";
 
     private static final String SERVICE_NAMES_TABLE = "service_names";
     private static final String SERVICE_NAMES_COLUMN_SERVICE_UID = "service_uid";
@@ -102,6 +107,14 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                 + SERVICE_NAMES_COLUMN_COUNTRY + " TEXT)"
         );
 
+       db.execSQL("CREATE TABLE " + AVAILABILITY_PERIOD_TABLE + " ("
+               + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
+               + AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
+               + AVAILABILITY_PERIOD_COLUMN_INDEX + " INTEGER NOT NULL, "
+               + AVAILABILITY_PERIOD_COLUMN_START_TIME + " TEXT NOT NULL, "
+               + AVAILABILITY_PERIOD_COLUMN_END_TIME + " TEXT NOT NULL)"
+       );
+
         // TODO: remove block
         ContentValues values = new ContentValues();
         values.put(SERVICE_LISTS_COLUMN_NAME, "my service list");
@@ -117,6 +130,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
         db.execSQL("DROP TABLE IF EXISTS " + SERVICE_LISTS_TABLE);
         db.execSQL("DROP TABLE IF EXISTS " + RELATED_MATERIALS_TABLE);
         db.execSQL("DROP TABLE IF EXISTS " + SERVICE_NAMES_TABLE);
+        db.execSQL("DROP TABLE IF EXISTS " + AVAILABILITY_PERIOD_TABLE);
         // TODO: delete dvbi services from the android channel database
         onCreate(db);
     }
@@ -276,6 +290,11 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                 db.insert(SERVICE_INSTANCES_TABLE, null, values);
             }
             updateRelatedMaterials(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + i, instance.getRelatedMaterials());
+
+            InstanceAvailabilityPeriod availabilityPeriod = instance.getAvailabilityPeriod();
+            if (availabilityPeriod != null) {
+                updateAvailabilityPeriod(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + i, availabilityPeriod);
+            }
         }
         // in case there are less services than before, delete those that have
         // higher index than the size of the current list
@@ -306,6 +325,24 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                 + ">=" + materials.size(), null);
     }
 
+    private void updateAvailabilityPeriod(SQLiteDatabase db, String foreignKey, InstanceAvailabilityPeriod availabilityPeriod) {
+        List<String> startTimes = availabilityPeriod.getStartTimes();
+        List<String> endTimes = availabilityPeriod.getEndTimes();
+
+        for (int i = 0; i < startTimes.size(); i++) {
+            ContentValues values = new ContentValues();
+            values.put(AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY, foreignKey);
+            values.put(AVAILABILITY_PERIOD_COLUMN_START_TIME, startTimes.get(i));
+            values.put(AVAILABILITY_PERIOD_COLUMN_END_TIME, endTimes.get(i));
+            values.put(AVAILABILITY_PERIOD_COLUMN_INDEX, i);
+            if (db.update(AVAILABILITY_PERIOD_TABLE, values, AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY
+                    + "='" + foreignKey + "' AND " + AVAILABILITY_PERIOD_COLUMN_INDEX
+                    + "=" + i, null) == 0) {
+                db.insert(AVAILABILITY_PERIOD_TABLE, null, values);
+            }
+        }
+    }
+
     private List<RelatedMaterial> getRelatedMaterials(SQLiteDatabase db, String foreignKey) {
         ArrayList<RelatedMaterial> materials = new ArrayList<>();
         String[] projection = { RELATED_MATERIALS_COLUMN_HOW_RELATED_HREF,
@@ -333,6 +370,29 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
         return materials;
     }
 
+    private InstanceAvailabilityPeriod getAvailabilityPeriod(SQLiteDatabase db, String foreignKey) {
+        List<String> startTimes = new ArrayList<>();
+        List<String> endTimes = new ArrayList<>();
+        String[] projection = { AVAILABILITY_PERIOD_COLUMN_START_TIME, AVAILABILITY_PERIOD_COLUMN_END_TIME };
+        Cursor cursor = null;
+        try {
+            cursor = db.query(AVAILABILITY_PERIOD_TABLE, projection,
+                    AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY + "='" + foreignKey + "'",
+                    null, null, null, AVAILABILITY_PERIOD_COLUMN_INDEX);
+            if (cursor != null) {
+                while (cursor.moveToNext()) {
+                    startTimes.add(cursor.getString(0));
+                    endTimes.add(cursor.getString(1));
+                }
+            }
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
+        return new InstanceAvailabilityPeriod(startTimes, endTimes);
+    }
+
     private List<DvbIServiceInstance> getServiceInstancesForUID(SQLiteDatabase db, String uid) {
         ArrayList<DvbIServiceInstance> instances = new ArrayList<>();
         String[] projection = { SERVICE_INSTANCES_COLUMN_DELIVERY_PARAMS, SERVICE_INSTANCES_COLUMN_PRIORITY,
@@ -349,7 +409,8 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                     try {
                         instances.add(new DvbIServiceInstance(cursor.getString(3), cursor.getInt(1),
                                 cursor.getString(4), new JSONObject(new String(cursor.getBlob(0))),
-                                getRelatedMaterials(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + cursor.getInt(2))));
+                                getRelatedMaterials(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + cursor.getInt(2)),
+                                getAvailabilityPeriod(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + cursor.getInt(2))));
                     } catch (JSONException e) {
                         throw new RuntimeException(e);
                     }
