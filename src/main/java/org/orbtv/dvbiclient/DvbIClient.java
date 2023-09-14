@@ -269,7 +269,7 @@ public class DvbIClient {
             if (instanceIndex < 0) {
                 for (int i = 0; i < mLastService.getInstances().size(); i++) {
                     DvbIServiceInstance instance = mLastService.getInstances().get(i);
-                    if (maxPriorityInstance == null || maxPriorityInstance.getPriority() < instance.getPriority()) {
+                    if (maxPriorityInstance == null || maxPriorityInstance.getPriority() > instance.getPriority()) {
                         maxPriorityInstance = instance;
                     }
                 }
