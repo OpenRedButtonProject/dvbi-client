@@ -91,10 +91,6 @@ public class DvbIView extends WebView {
         Log.i(TAG, "Tuning to url " + url + "...");
         if (url != null && url.startsWith("http")) {
             mLastUrl = url;
-            JSONObject data = new JSONObject();
-            for (JSCallback handler : mJSCallbacks) {
-                handler.onVideoEvent("DVBI_PLAYBACK_STARTED", data);
-            }
             mContext.getMainExecutor().execute(() -> {
                 synchronized (mPageLoaded) {
                     if (!DVBI_PAGE.equals(this.getUrl())) {

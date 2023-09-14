@@ -116,12 +116,7 @@ public class DvbIClient {
                     tsid = triplet.getTsId();
                     sid = triplet.getServiceId();
                 }
-                for (HbbTVCallback handler : mHbbTVCallbacks) {
-                    handler.onChannelChangeStatus(onid, tsid, sid, HBBTV_CHANNEL_STATUS_LOOKUP.get(eventName));
-                }
-                for (DvbCallback handler : mDvbCallbacks) {
-                    handler.onPlayerStatusChanged(eventName);
-                }
+                dispatchPlayerStatusChangedEvent(onid, tsid, sid, eventName);
                 Log.i(TAG, "Received video event " + eventName);
 
                 if (mReadyForApps && eventName.equals(PLAYER_STATUS_PLAYING) && processXmlAitCallback != null) {
@@ -368,12 +363,21 @@ public class DvbIClient {
             .build();
     }
 
+    private void dispatchPlayerStatusChangedEvent(int onid, int tsid, int sid, String event) {
+        for (HbbTVCallback handler : mHbbTVCallbacks) {
+            handler.onChannelChangeStatus(onid, tsid, sid, HBBTV_CHANNEL_STATUS_LOOKUP.get(event));
+        }
+        for (DvbCallback handler : mDvbCallbacks) {
+            handler.onPlayerStatusChanged(event);
+        }
+    }
+
     private int tuneToServiceInstance(DvbIServiceInstance instance) {
-        boolean shouldStartPeriodAvailabilityThread = false;
+        boolean isNewInstance = false;
         int result = DELIVERY_TYPE_UNKNOWN;
         if (instance != mLastServiceInstace) {
             stopInstanceCheckThread();
-            shouldStartPeriodAvailabilityThread = true;
+            isNewInstance = true;
             mLastServiceInstace = instance;
         }
 
@@ -387,9 +391,12 @@ public class DvbIClient {
             if (channel.getAppControlUris().isEmpty()) {
                 if (instance.getDeliveryType().equals("dvb-dash")) {
                     if (mDvbIView.tune(uri)) {
+                        dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
                         mReadyForApps = true;
-                        for (HbbTVCallback handler : mHbbTVCallbacks) {
-                            handler.onServiceInstanceChange(index);
+                        if (isNewInstance) {
+                            for (HbbTVCallback handler : mHbbTVCallbacks) {
+                                handler.onServiceInstanceChange(index);
+                            }
                         }
                         result = DELIVERY_TYPE_BROADBAND;
                     }
@@ -399,26 +406,21 @@ public class DvbIClient {
                     for (BroadcastCallback callback : mBroadcastCallbacks) {
                         callback.onTune(instance.getTriplet().toString());
                     }
-
-                    for (HbbTVCallback handler : mHbbTVCallbacks) {
-                        handler.onServiceInstanceChange(index);
+                    if (isNewInstance) {
+                        for (HbbTVCallback handler : mHbbTVCallbacks) {
+                            handler.onServiceInstanceChange(index);
+                        }
                     }
                     result = DELIVERY_TYPE_BROADCAST;
                 }
-                if (shouldStartPeriodAvailabilityThread) {
+                if (isNewInstance) {
                     startInstanceCheckThread();
                 }
             }
             else {
                 mDvbIView.tuneOff();
-                for (HbbTVCallback handler : mHbbTVCallbacks) {
-                    handler.onChannelChangeStatus(channel.getOnid(), channel.getTsid(), channel.getSid(), HBBTV_CHANNEL_STATUS_LOOKUP.get(PLAYER_STATUS_STARTING));
-                    handler.onChannelChangeStatus(channel.getOnid(), channel.getTsid(), channel.getSid(), HBBTV_CHANNEL_STATUS_LOOKUP.get(PLAYER_STATUS_PLAYING));
-                }
-                for (DvbCallback handler : mDvbCallbacks) {
-                    handler.onPlayerStatusChanged(PLAYER_STATUS_STARTING);
-                    handler.onPlayerStatusChanged(PLAYER_STATUS_PLAYING);
-                }
+                dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
+                dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_PLAYING);
 
                 Log.i(TAG, "Found Hbbtv App from Related Materials (" + channel.getAppControlUris().get(0) + ")");
                 new GetXmlAitTask().execute(new XmlAitAttributes(channel.getAppControlUris().get(0), LINKED_APP_SCHEME_1_2));
@@ -429,13 +431,13 @@ public class DvbIClient {
     }
 
     private class AvailabilityPeriodRunnable implements Runnable {
-        DvbIServiceInstance lastServiceInstace;
+        DvbIServiceInstance boundServiceInstance;
         private List<String> mServiceStartTimes;
         private List<String> mServiceEndTimes;
         private int mLastCheckedIndex;
 
         AvailabilityPeriodRunnable() {
-            lastServiceInstace = mLastServiceInstace;
+            boundServiceInstance = mLastServiceInstace;
             mServiceStartTimes = mLastServiceInstace.getAvailabilityPeriod().getStartTimes();
             mServiceEndTimes = mLastServiceInstace.getAvailabilityPeriod().getEndTimes();
             mLastCheckedIndex = 0;
@@ -450,15 +452,23 @@ public class DvbIClient {
 
                 if (currentTimeMillis >= nextStartTimeMillis && currentTimeMillis <= nextEndTimeMillis) {
                     Log.i(TAG, "Service instance is active.");
-                    tuneToServiceInstance(lastServiceInstace);
+                    tuneToServiceInstance(boundServiceInstance);
                     mInstanceCheckHandler.postDelayed(this, nextEndTimeMillis - currentTimeMillis + 1);
                 } else if (currentTimeMillis < nextStartTimeMillis) {
                     Log.i(TAG, "Service instance is not active.");
                     for (BroadcastCallback cb : mBroadcastCallbacks) {
                         cb.onTuneOff();
                     }
-                    mDvbIView.tuneOff();
-                    // TODO: may need to call handler.onChannelChangeStatus and handler.onPlayerStatusChanged methods here
+                    synchronized (mDvbIView) {
+                        mDvbIView.tuneOff();
+                        DvbIChannelAdapter channel = DvbIChannelAdapter.createChannel(mLastService, boundServiceInstance, "");
+                        dispatchPlayerStatusChangedEvent(
+                            channel.getOnid(),
+                            channel.getTsid(),
+                            channel.getSid(),
+                            PLAYER_STATUS_STARTING
+                        );
+                    }
                     mInstanceCheckHandler.postDelayed(this, nextStartTimeMillis - currentTimeMillis);
                 } else {
                     mLastCheckedIndex++;
