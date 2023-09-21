@@ -25,6 +25,13 @@
             player.on(orb_dashjs.MediaPlayer.events.PLAYBACK_STALLED, function(e) {
                 Android.onVideoEvent('DVBI_PLAYBACK_STALLED', JSON.stringify(e));
             });
+
+            player.on('urn:dvb:dash:appsignalling:2016', function (payload) {
+                //payload.event.messageData = payload.event.messageData.replace("hbbtv1.test/_TESTSUITE/TESTS", "192.168.1.33/hbbtv_tests");
+                //payload.event.messageData = payload.event.messageData.replace(".html5", ".html");
+                console.log(payload.event.messageData);
+                Android.onVideoEvent(payload.type, JSON.stringify(payload.event));
+            });
         }
         function orb_loadMedia(url) {
             if (lastSource !== url) {

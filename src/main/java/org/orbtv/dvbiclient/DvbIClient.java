@@ -43,6 +43,8 @@ public class DvbIClient {
     public static final String PLAYER_STATUS_BAD_CONNECTION = "DVBI_PLAYBACK_STALLED";
     public static final String PLAYER_STATUS_ERROR = "DVBI_PLAYBACK_ERROR";
 
+    public static final String PLAYER_EVENT_APP_SIGNALLING = "urn:dvb:dash:appsignalling:2016";
+
     public static final String LINKED_APP_SCHEME_1_1 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:1.1";
     public static final String LINKED_APP_SCHEME_1_2 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:1.2";
 
@@ -106,25 +108,36 @@ public class DvbIClient {
     private final DvbIView.JSCallback mJSCallback = new DvbIView.JSCallback() {
         @Override
         public void onVideoEvent(String eventName, JSONObject data) {
-            if (mLastService != null && HBBTV_CHANNEL_STATUS_LOOKUP.containsKey(eventName)) {
-                Triplet triplet = mLastService.getTriplet();
-                int onid = 0;
-                int tsid = 0;
-                int sid = 0;
-                if (triplet != null) {
-                    onid = triplet.getOrigNetId();
-                    tsid = triplet.getTsId();
-                    sid = triplet.getServiceId();
+            if (mLastService != null) {
+                if (HBBTV_CHANNEL_STATUS_LOOKUP.containsKey(eventName)) {
+                    Triplet triplet = mLastService.getTriplet();
+                    int onid = 0;
+                    int tsid = 0;
+                    int sid = 0;
+                    if (triplet != null) {
+                        onid = triplet.getOrigNetId();
+                        tsid = triplet.getTsId();
+                        sid = triplet.getServiceId();
+                    }
+                    dispatchPlayerStatusChangedEvent(onid, tsid, sid, eventName);
+                    Log.i(TAG, "Received video event " + eventName);
+
+                    if (mReadyForApps && eventName.equals(PLAYER_STATUS_PLAYING) && processXmlAitCallback != null) {
+                        List<String> appUri = DvbIChannelAdapter.createChannel(mLastService, mLastServiceInstace, "").getAppParallelUris();
+                        if (!appUri.isEmpty()) {
+                            Log.i(TAG, "Found Hbbtv App from Related Materials (" + appUri + ")");
+                            new GetXmlAitTask().execute(new XmlAitAttributes(appUri.get(0), LINKED_APP_SCHEME_1_1));
+                        }
+                    }
                 }
-                dispatchPlayerStatusChangedEvent(onid, tsid, sid, eventName);
-                Log.i(TAG, "Received video event " + eventName);
-
-                if (mReadyForApps && eventName.equals(PLAYER_STATUS_PLAYING) && processXmlAitCallback != null) {
-                    List<String> appUri = DvbIChannelAdapter.createChannel(mLastService, mLastServiceInstace, "").getAppParallelUris();
-                    if (!appUri.isEmpty()) {
-                        Log.i(TAG, "Found Hbbtv App from Related Materials (" + appUri + ")");
-
-                        new GetXmlAitTask().execute(new XmlAitAttributes(appUri.get(0), LINKED_APP_SCHEME_1_1));
+                else if (PLAYER_EVENT_APP_SIGNALLING.equals(eventName)) {
+                    if (processXmlAitCallback != null && data != null) {
+                        try {
+                            processXmlAitCallback.processXmlAit(data.getString("messageData"), LINKED_APP_SCHEME_1_1);
+                            mReadyForApps = false;
+                        } catch (JSONException e) {
+                            e.printStackTrace();
+                        }
                     }
                 }
             }
