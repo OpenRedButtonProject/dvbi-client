@@ -3,14 +3,15 @@ package org.orbtv.dvbiclient;
 import android.media.tv.TvContract;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 public class DvbIChannelAdapter {
+
+    private static String preferredUILanguage = "";
     private String channelType;
-    private String idType;
+    private int idType;
     private int onid;
     private String nid;
     private int tsid;
@@ -25,7 +26,7 @@ public class DvbIChannelAdapter {
     private List<String> appParallelUri;
     private List<String> appControlUri;
 
-    public static DvbIChannelAdapter createChannel(DvbIService service, String preferredLanguage) {
+    public static DvbIChannelAdapter createChannel(DvbIService service) {
         DvbIChannelAdapter channel = new DvbIChannelAdapter();
         channel.channelType = determineChannelType(service);
         channel.idType = determineIdType(service);
@@ -33,7 +34,7 @@ public class DvbIChannelAdapter {
         channel.nid = null; // Undefined or will be populated later
         channel.tsid = determineTsid(service);
         channel.sid = determineSid(service);
-        channel.name = determineChannelName(service, preferredLanguage);
+        channel.name = determineChannelName(service, preferredUILanguage);
         channel.majorChannel = determineMajorChannel(service);
         channel.dsd = null; // Undefined
         channel.ipBroadcastID = service.getUniqueIdentifier();
@@ -45,7 +46,7 @@ public class DvbIChannelAdapter {
         return channel;
     }
 
-    public static DvbIChannelAdapter createChannel(DvbIService parentService, DvbIServiceInstance instance, String preferredLanguage) {
+    public static DvbIChannelAdapter createChannel(DvbIService parentService, DvbIServiceInstance instance) {
         DvbIChannelAdapter channel = new DvbIChannelAdapter();
         channel.channelType = determineChannelType(parentService);
         channel.idType = determineIdType(instance);
@@ -53,7 +54,7 @@ public class DvbIChannelAdapter {
         channel.nid = null; // Undefined
         channel.tsid = determineTsid(instance, parentService);
         channel.sid = determineSid(instance, parentService);
-        channel.name = determineChannelName(parentService, instance, preferredLanguage);
+        channel.name = determineChannelName(parentService, instance, preferredUILanguage);
         channel.majorChannel = determineMajorChannel(parentService);
         channel.dsd = null; // Undefined or will be populated later
         channel.ipBroadcastID = instance.getDeliveryParameters().get("UriBasedLocation");
@@ -63,6 +64,10 @@ public class DvbIChannelAdapter {
         channel.appParallelUri = determineApps(instance, parentService, "urn:dvb:metadata:cs:LinkedApplicationCS:2019:1.1");
         channel.appControlUri = determineApps(instance, parentService, "urn:dvb:metadata:cs:LinkedApplicationCS:2019:1.2");
         return channel;
+    }
+
+    public static void setPreferredUILanguage(String lang) {
+        preferredUILanguage = lang;
     }
 
     private static List<String> determineApps(DvbIService service, String appType) {
@@ -136,7 +141,7 @@ public class DvbIChannelAdapter {
                 relatedMaterial.isXmlAitContentType();
     }
 
-    private static String determineIdType(DvbIService service) {
+    private static int determineIdType(DvbIService service) {
         List<DvbIServiceInstance> instances = service.getInstances();
         String deliveryType = null;
 
@@ -161,34 +166,42 @@ public class DvbIChannelAdapter {
             String lowerCaseDeliveryType = deliveryType.toLowerCase();
             switch (lowerCaseDeliveryType) {
                 case "dvb-c":
-                    return "ID_DVB_C";
+                    //return "ID_DVB_C";
+                    return 10;
                 case "dvb-t":
-                    return "ID_DVB_T";
+                    //return "ID_DVB_T";
+                    return 12;
                 case "dvb-s":
-                    return "ID_DVB_S";
+                    //return "ID_DVB_S";
+                    return 11;
             }
         }
 
-        return "ID_DVB_I";
+        return 50;
     }
 
 
-    private static String determineIdType(DvbIServiceInstance instance) {
+    private static int determineIdType(DvbIServiceInstance instance) {
         String deliveryType = instance.getDeliveryType();
 
         if (deliveryType != null && !deliveryType.isEmpty()) {
             switch (deliveryType.toLowerCase()) {
                 case "dvb-c":
-                    return "ID_DVB_C";
+                    //return "ID_DVB_C";
+                    return 10;
                 case "dvb-t":
-                    return "ID_DVB_T";
+                    //return "ID_DVB_T";
+                    return 12;
                 case "dvb-s":
-                    return "ID_DVB_S";
+                    //return "ID_DVB_S";
+                    return 11;
                 case "dvb-dash":
-                    return "ID_DVB_DASH";
+                    //return "ID_DVB_DASH";
+                    return 51;
             }
         }
-        return "UNSUPPORTED"; //default value? also support for T2, S2
+        //return "UNSUPPORTED"; //default value? also support for T2, S2
+        return -1;
     }
 
 
@@ -254,7 +267,7 @@ public class DvbIChannelAdapter {
         if (serviceNames != null && !serviceNames.isEmpty()) {
             if (preferredLanguage != null && !preferredLanguage.isEmpty()) {
                 for (Map.Entry<String, String> entry : serviceNames.entrySet()) {
-                    if (entry.getValue().equals(preferredLanguage)) {
+                    if (preferredLanguage.equals(entry.getValue())) {
                         return entry.getKey();
                     }
                 }
@@ -295,7 +308,7 @@ public class DvbIChannelAdapter {
         return channelType;
     }
 
-    public String getIdType() {
+    public int getIdType() {
         return idType;
     }
 

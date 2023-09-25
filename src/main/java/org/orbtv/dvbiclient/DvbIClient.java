@@ -123,7 +123,7 @@ public class DvbIClient {
                     Log.i(TAG, "Received video event " + eventName);
 
                     if (mReadyForApps && eventName.equals(PLAYER_STATUS_PLAYING) && processXmlAitCallback != null) {
-                        List<String> appUri = DvbIChannelAdapter.createChannel(mLastService, mLastServiceInstace, "").getAppParallelUris();
+                        List<String> appUri = DvbIChannelAdapter.createChannel(mLastService, mLastServiceInstace).getAppParallelUris();
                         if (!appUri.isEmpty()) {
                             Log.i(TAG, "Found Hbbtv App from Related Materials (" + appUri + ")");
                             new GetXmlAitTask().execute(new XmlAitAttributes(appUri.get(0), LINKED_APP_SCHEME_1_1));
@@ -355,7 +355,7 @@ public class DvbIClient {
     }
 
     private DvbChannel createChannel(DvbIService service) throws JSONException {
-        DvbIChannelAdapter channel = DvbIChannelAdapter.createChannel(service, "");
+        DvbIChannelAdapter channel = DvbIChannelAdapter.createChannel(service);
         InternalProviderData data = new InternalProviderData();
         data.put("DVB_URI", "");
         data.put("NET_ID", channel.getNid() == null ? "0" : channel.getNid());
@@ -399,7 +399,7 @@ public class DvbIClient {
             String uri = instance.getUri();
             Log.i(TAG, "Max priority instance of type " + instance.getDeliveryType());
 
-            DvbIChannelAdapter channel = DvbIChannelAdapter.createChannel(mLastService, instance, "");
+            DvbIChannelAdapter channel = DvbIChannelAdapter.createChannel(mLastService, instance);
             Log.i(TAG, "---------- channel info ----------\n" + channel + "\n------------------------------------");
             if (channel.getAppControlUris().isEmpty()) {
                 if (instance.getDeliveryType().equals("dvb-dash")) {
@@ -474,7 +474,7 @@ public class DvbIClient {
                     }
                     synchronized (mDvbIView) {
                         mDvbIView.tuneOff();
-                        DvbIChannelAdapter channel = DvbIChannelAdapter.createChannel(mLastService, boundServiceInstance, "");
+                        DvbIChannelAdapter channel = DvbIChannelAdapter.createChannel(mLastService, boundServiceInstance);
                         dispatchPlayerStatusChangedEvent(
                             channel.getOnid(),
                             channel.getTsid(),
