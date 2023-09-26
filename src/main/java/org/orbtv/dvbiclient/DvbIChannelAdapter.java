@@ -34,7 +34,7 @@ public class DvbIChannelAdapter {
         channel.nid = null; // Undefined or will be populated later
         channel.tsid = determineTsid(service);
         channel.sid = determineSid(service);
-        channel.name = determineChannelName(service, preferredUILanguage);
+        channel.name = determineChannelName(service.getServiceNames(), preferredUILanguage);
         channel.majorChannel = determineMajorChannel(service);
         channel.dsd = null; // Undefined
         channel.ipBroadcastID = service.getUniqueIdentifier();
@@ -262,11 +262,10 @@ public class DvbIChannelAdapter {
         return 0;
     }
 
-    private static String determineChannelName(DvbIService service, String preferredLanguage) {
-        Map<String, String> serviceNames = service.getServiceNames();
-        if (serviceNames != null && !serviceNames.isEmpty()) {
+    private static String determineChannelName(Map<String, String> names, String preferredLanguage) {
+        if (names != null && !names.isEmpty()) {
             if (preferredLanguage != null && !preferredLanguage.isEmpty()) {
-                for (Map.Entry<String, String> entry : serviceNames.entrySet()) {
+                for (Map.Entry<String, String> entry : names.entrySet()) {
                     if (preferredLanguage.equals(entry.getValue())) {
                         return entry.getKey();
                     }
@@ -274,7 +273,7 @@ public class DvbIChannelAdapter {
             }
 
             // If the preferred language is not found or empty, select the first available name
-            for (String name : serviceNames.keySet()) {
+            for (String name : names.keySet()) {
                 return name;
             }
         }
@@ -282,12 +281,12 @@ public class DvbIChannelAdapter {
     }
 
     private static String determineChannelName(DvbIService parentService, DvbIServiceInstance instance, String preferredLanguage) {
-        String displayName = instance.getDisplayName();
+        String displayName = determineChannelName(instance.getDisplayNames(), preferredLanguage);
         if (displayName != null && !displayName.isEmpty()) {
             return displayName;
         }
 
-        return determineChannelName(parentService, preferredLanguage);
+        return determineChannelName(parentService.getServiceNames(), preferredLanguage);
     }
 
     private static String determineMajorChannel(DvbIService service) {

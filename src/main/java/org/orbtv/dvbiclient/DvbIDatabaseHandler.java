@@ -18,7 +18,7 @@ import java.util.Map;
 
 public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     private static final String TAG = DvbIDatabaseHandler.class.getSimpleName();
-    private static final int DB_VERSION = 14;
+    private static final int DB_VERSION = 16;
     private static final String DB_NAME = "dvbi_db";
     private static final String FOREIGN_KEY_PREFIX_SERVICE = "service_";
     private static final String FOREIGN_KEY_PREFIX_INSTANCE = "instance_";
@@ -38,7 +38,6 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
 
     private static final String SERVICE_INSTANCES_TABLE = "service_instances";
     private static final String SERVICE_INSTANCES_COLUMN_SERVICE_UID = "service_uid";
-    private static final String SERVICE_INSTANCES_COLUMN_NAME = "name";
     private static final String SERVICE_INSTANCES_COLUMN_INDEX = "array_index";
     private static final String SERVICE_INSTANCES_COLUMN_PRIORITY = "priority";
     private static final String SERVICE_INSTANCES_COLUMN_DELIVERY_PARAMS = "delivery_params";
@@ -86,7 +85,6 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
         db.execSQL("CREATE TABLE " + SERVICE_INSTANCES_TABLE + " ("
                 + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
                 + SERVICE_INSTANCES_COLUMN_SERVICE_UID + " TEXT NOT NULL, "
-                + SERVICE_INSTANCES_COLUMN_NAME + " TEXT, "
                 + SERVICE_INSTANCES_COLUMN_INDEX + " INTEGER NOT NULL, "
                 + SERVICE_INSTANCES_COLUMN_PRIORITY + " INTEGER,"
                 + SERVICE_INSTANCES_COLUMN_DELIVERY_TYPE + " TEXT,"
@@ -225,6 +223,9 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                 uids += "'" + uid + "'";
             }
             updateService(db, service);
+            for (int i = 0; i < service.getInstances().size(); ++i) {
+                uids += ",'" + uid + "_" + i + "'";
+            }
         }
         if (!uids.isEmpty()) {
             Log.i(TAG, "Deleting service and instances with UIDs not in " + uids);
@@ -272,7 +273,6 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
             values.put(SERVICE_INSTANCES_COLUMN_SERVICE_UID, uid);
             values.put(SERVICE_INSTANCES_COLUMN_PRIORITY, instance.getPriority());
             values.put(SERVICE_INSTANCES_COLUMN_INDEX, i);
-            values.put(SERVICE_INSTANCES_COLUMN_NAME, instance.getDisplayName());
             values.put(SERVICE_INSTANCES_COLUMN_DELIVERY_TYPE, instance.getDeliveryType());
             for (Map.Entry<String,String> entry : instance.getDeliveryParameters().entrySet()) {
                 try {
@@ -289,6 +289,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
                             + SERVICE_INSTANCES_COLUMN_INDEX + "=" + i, null) == 0) {
                 db.insert(SERVICE_INSTANCES_TABLE, null, values);
             }
+            updateServiceNames(db, uid + "_" + i, instance.getDisplayNames());
             updateRelatedMaterials(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + i, instance.getRelatedMaterials());
 
             InstanceAvailabilityPeriod availabilityPeriod = instance.getAvailabilityPeriod();
@@ -396,7 +397,7 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
     private List<DvbIServiceInstance> getServiceInstancesForUID(SQLiteDatabase db, String uid) {
         ArrayList<DvbIServiceInstance> instances = new ArrayList<>();
         String[] projection = { SERVICE_INSTANCES_COLUMN_DELIVERY_PARAMS, SERVICE_INSTANCES_COLUMN_PRIORITY,
-                SERVICE_INSTANCES_COLUMN_INDEX, SERVICE_INSTANCES_COLUMN_NAME, SERVICE_INSTANCES_COLUMN_DELIVERY_TYPE };
+                SERVICE_INSTANCES_COLUMN_INDEX, SERVICE_INSTANCES_COLUMN_DELIVERY_TYPE };
         Cursor cursor = null;
         try
         {
@@ -407,8 +408,8 @@ public class DvbIDatabaseHandler extends SQLiteOpenHelper {
             {
                 while (cursor.moveToNext()) {
                     try {
-                        instances.add(new DvbIServiceInstance(cursor.getString(3), cursor.getInt(1),
-                                cursor.getString(4), new JSONObject(new String(cursor.getBlob(0))),
+                        instances.add(new DvbIServiceInstance(getServiceNamesForUID(db, uid + "_" + instances.size()), cursor.getInt(1),
+                                cursor.getString(3), new JSONObject(new String(cursor.getBlob(0))),
                                 getRelatedMaterials(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + cursor.getInt(2)),
                                 getAvailabilityPeriod(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + cursor.getInt(2))));
                     } catch (JSONException e) {

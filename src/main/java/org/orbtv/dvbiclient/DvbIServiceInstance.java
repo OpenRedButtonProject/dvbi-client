@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 public class DvbIServiceInstance {
-    private String displayName;
+    private Map<String, String> displayNames = new HashMap<>();
     private String serviceName;
     private int priority;
     private InstanceAvailabilityPeriod availabilityPeriods;
@@ -23,10 +23,10 @@ public class DvbIServiceInstance {
     private DvbIServiceInstance() {
     }
 
-    public DvbIServiceInstance(String displayName, int priority, String deliveryType, JSONObject deliveryParams, 
+    public DvbIServiceInstance(Map<String, String> displayNames, int priority, String deliveryType, JSONObject deliveryParams,
                                     List<RelatedMaterial> relatedMaterials, InstanceAvailabilityPeriod availabilityPeriods) {
         Iterator<String> keys = deliveryParams.keys();
-        this.displayName = displayName;
+        this.displayNames = displayNames;
         this.priority = priority;
         this.relatedMaterials = relatedMaterials;
         this.deliveryType = deliveryType;
@@ -52,7 +52,9 @@ public class DvbIServiceInstance {
             if (eventType == XmlPullParser.START_TAG) {
                 switch (xpp.getName()) {
                     case "DisplayName":
-                        instance.displayName = xpp.nextText();
+                        String language = xpp.getAttributeValue(null, "lang");
+                        String name = xpp.nextText();
+                        instance.displayNames.put(name, language);
                         break;
                     case "ServiceInstance":
                         instance.priority = Integer.parseInt(xpp.getAttributeValue(null, "priority"));
@@ -147,7 +149,7 @@ public class DvbIServiceInstance {
     @Override
     public String toString() {
         String ret = "- " + this.getClass().getSimpleName() + " -"
-                + "\ndisplayName: " + this.displayName
+                + "\ndisplayName: " + this.displayNames
                 + "\ndeliveryParams: " + this.deliveryParameters
                 + "\npriority: " + this.priority
                 + "\ntriplet: " + this.triplet
@@ -158,8 +160,8 @@ public class DvbIServiceInstance {
         return ret;
     }
 
-    public String getDisplayName() {
-        return displayName;
+    public Map<String, String> getDisplayNames() {
+        return displayNames;
     }
 
     public String getServiceName() {
