@@ -24,6 +24,7 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,9 +62,14 @@ public class DvbIClient {
         put(PLAYER_STATUS_BAD_CONNECTION, 101);
         put(PLAYER_STATUS_ERROR, 100);
     }};
+
+    private static final List<String> STREAM_EVENTS = new ArrayList<>(Arrays.asList(
+            "urn:dvb:dash:appsignalling:2016"
+    ));
     private static DvbIClient mSingleton;
     private static final String TAG = DvbIClient.class.getSimpleName();
     private DvbIView mDvbIView;
+    private HashMap<Integer, String> mStreamEventsLookup = new HashMap<>();
     private ServiceListDiscoveryTask mLastDiscoveryTask = null;
     private DvbIDatabaseHandler mDbHandler;
     private DvbIService mLastService;
@@ -71,6 +77,7 @@ public class DvbIClient {
     private final ArrayList<DvbCallback> mDvbCallbacks = new ArrayList<>();
     private final ArrayList<HbbTVCallback> mHbbTVCallbacks = new ArrayList<>();
     private final ArrayList<BroadcastCallback> mBroadcastCallbacks = new ArrayList<>();
+    private final ArrayList<StreamEventCallback> mStreamEventCallbacks = new ArrayList<>();
     private ProcessXmlAitCallback processXmlAitCallback;
     private Boolean mReadyForApps = false;
     private Handler mInstanceCheckHandler;
@@ -105,6 +112,10 @@ public class DvbIClient {
         void processXmlAit(String xmlAit, String scheme);
     }
 
+    public interface StreamEventCallback {
+        void onStreamEvent(int listenId, String name, String status);
+    }
+
     private final DvbIView.JSCallback mJSCallback = new DvbIView.JSCallback() {
         @Override
         public void onVideoEvent(String eventName, JSONObject data) {
@@ -130,13 +141,30 @@ public class DvbIClient {
                         }
                     }
                 }
-                else if (PLAYER_EVENT_APP_SIGNALLING.equals(eventName)) {
-                    if (processXmlAitCallback != null && data != null) {
-                        try {
-                            processXmlAitCallback.processXmlAit(data.getString("messageData"), LINKED_APP_SCHEME_1_1);
-                            mReadyForApps = false;
-                        } catch (JSONException e) {
-                            e.printStackTrace();
+                else if (STREAM_EVENTS.contains(eventName)) {
+                    for (Map.Entry<Integer, String> entry : mStreamEventsLookup.entrySet()) {
+                        if (entry.getValue().equals(eventName)) {
+                            try {
+                                for (StreamEventCallback cb : mStreamEventCallbacks) {
+                                    cb.onStreamEvent(
+                                            entry.getKey(),
+                                            data.getString("value"),
+                                            data.getString("status")
+                                    );
+                                }
+                            } catch (JSONException e) {
+                                e.printStackTrace();
+                            }
+                        }
+                    }
+                    if (PLAYER_EVENT_APP_SIGNALLING.equals(eventName)) {
+                        if (processXmlAitCallback != null && data != null) {
+                            try {
+                                processXmlAitCallback.processXmlAit(data.getString("messageData"), LINKED_APP_SCHEME_1_1);
+                                mReadyForApps = false;
+                            } catch (JSONException e) {
+                                e.printStackTrace();
+                            }
                         }
                     }
                 }
@@ -264,8 +292,30 @@ public class DvbIClient {
         mBroadcastCallbacks.remove(handler);
     }
 
+    public synchronized void addStreamEventCallback(StreamEventCallback handler) {
+        if (!mStreamEventCallbacks.contains(handler)) {
+            mStreamEventCallbacks.add(handler);
+        }
+    }
+
+    public synchronized void removeStreamEventCallback(StreamEventCallback handler) {
+        mStreamEventCallbacks.remove(handler);
+    }
+
     public synchronized void setProcessXmlAitCallback(ProcessXmlAitCallback callback) {
         this.processXmlAitCallback = callback;
+    }
+
+    public synchronized boolean subscribeStreamEvent(int listenId, String targetUrl, String eventName) {
+        if (targetUrl != null) {
+            mStreamEventsLookup.put(listenId, targetUrl);
+            return true;
+        }
+        return false;
+    }
+
+    public synchronized void unsubscribeStreamEvent(int listenId) {
+        mStreamEventsLookup.remove(listenId);
     }
 
     public View getView() {
