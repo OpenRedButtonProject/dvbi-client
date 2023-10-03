@@ -148,8 +148,8 @@ public class DvbIClient {
                                 for (StreamEventCallback cb : mStreamEventCallbacks) {
                                     cb.onStreamEvent(
                                             entry.getKey(),
-                                            data.getString("value"),
-                                            data.getString("status")
+                                            data.getJSONObject("eventStream").getString("value"),
+                                            "trigger"
                                     );
                                 }
                             } catch (JSONException e) {
