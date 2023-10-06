@@ -67,6 +67,12 @@ public class DvbIClient {
     private ProcessXmlAitCallback processXmlAitCallback;
     private Boolean mReadyForApps = false;
     private DvbIService.Callback mServiceCallback = new DvbIService.Callback() {
+        private void tuneOffBroadcast() {
+            for (BroadcastCallback cb : mBroadcastCallbacks) {
+                cb.onTuneOff();
+            }
+        }
+        
         @Override
         public void onInstanceChanged(DvbIService service, DvbIServiceInstance fromInstance, DvbIServiceInstance toInstance) {
             DvbIChannelAdapter channel;
@@ -79,6 +85,7 @@ public class DvbIClient {
                         Log.i(TAG, "---------- channel info ----------\n" + channel + "\n------------------------------------");
                         if (channel.getAppControlUris().isEmpty()) {
                             if (toInstance.getDeliveryType().equals("dvb-dash")) {
+                                tuneOffBroadcast();
                                 if (mDvbIView.tune(uri)) {
                                     dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
                                     mReadyForApps = true;
@@ -91,9 +98,7 @@ public class DvbIClient {
                                 }
                             }
                         } else {
-                            for (DvbIClient.BroadcastCallback cb : mBroadcastCallbacks) {
-                                cb.onTuneOff();
-                            }
+                            tuneOffBroadcast();
                             mDvbIView.tuneOff();
                             dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
                             dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_PLAYING);
@@ -110,9 +115,7 @@ public class DvbIClient {
                         }
                     } else {
                         Log.i(TAG, "No service instance is currently available.");
-                        for (DvbIClient.BroadcastCallback cb : mBroadcastCallbacks) {
-                            cb.onTuneOff();
-                        }
+                        tuneOffBroadcast();
                         mDvbIView.tuneOff();
                         channel = DvbIChannelAdapter.createChannel(mLastService, fromInstance);
                         dispatchPlayerStatusChangedEvent(
