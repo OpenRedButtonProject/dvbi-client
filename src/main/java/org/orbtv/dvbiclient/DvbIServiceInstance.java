@@ -4,11 +4,15 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.xmlpull.v1.XmlPullParser;
 
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 
 public class DvbIServiceInstance {
     private Map<String, String> displayNames = new HashMap<>();
@@ -42,6 +46,39 @@ public class DvbIServiceInstance {
         try {
             this.triplet = new Triplet(deliveryParams.getString("DVBTriplet"));
         } catch (Exception e) {
+        }
+    }
+
+    public boolean isAvailable() {
+        boolean result = false;
+        if (availabilityPeriods == null || availabilityPeriods.getStartTimes().isEmpty()) {
+            result = true;
+        }
+        else {
+            long currentTime = System.currentTimeMillis() % 86400000; // TODO: may need to remove modulo operation
+            List<String> startTimes = availabilityPeriods.getStartTimes();
+            List<String> endTimes = availabilityPeriods.getEndTimes();
+            for (int i = 0; i < startTimes.size(); ++i) {
+                long start = convertToMillis(startTimes.get(i));
+                long end = convertToMillis(endTimes.get(i));
+                if (currentTime >= start && currentTime < end) {
+                    result = true;
+                    break;
+                }
+            }
+        }
+        return result;
+    }
+
+    private long convertToMillis(String timeString) {
+        try {
+            SimpleDateFormat format = new SimpleDateFormat("HH:mm:ss'Z'");
+            format.setTimeZone(TimeZone.getTimeZone("UTC"));
+            Date date = format.parse(timeString);
+            return date.getTime();
+        } catch (ParseException e) {
+            e.printStackTrace();
+            return 0;
         }
     }
 

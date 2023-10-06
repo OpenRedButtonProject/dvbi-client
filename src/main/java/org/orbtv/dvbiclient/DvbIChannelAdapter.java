@@ -25,6 +25,8 @@ public class DvbIChannelAdapter {
     private List<DvbIServiceInstance> serviceInstances = new ArrayList<>();
     private List<String> appParallelUri;
     private List<String> appControlUri;
+    private List<String> appInactiveUri;
+    private List<String> outOfServiceImage;
 
     public static DvbIChannelAdapter createChannel(DvbIService service) {
         DvbIChannelAdapter channel = new DvbIChannelAdapter();
@@ -41,12 +43,17 @@ public class DvbIChannelAdapter {
         channel.terminalChannel = determineTerminalChannel(service);
         channel.serviceInstances = service.getInstances();
         channel.parentService = null;
-        channel.appParallelUri = determineApps(service, "1.1");
-        channel.appControlUri = determineApps(service, "1.2");
+        channel.appParallelUri = determineApps(service, DvbIClient.LINKED_APP_SCHEME_1_1);
+        channel.appControlUri = determineApps(service, DvbIClient.LINKED_APP_SCHEME_1_2);
+        channel.appInactiveUri = determineApps(service, DvbIClient.LINKED_APP_SCHEME_2);
+        channel.outOfServiceImage = determineApps(service, DvbIClient.LINKED_APP_SCHEME_1000_1);
         return channel;
     }
 
     public static DvbIChannelAdapter createChannel(DvbIService parentService, DvbIServiceInstance instance) {
+        if (instance == null) {
+            return createChannel(parentService);
+        }
         DvbIChannelAdapter channel = new DvbIChannelAdapter();
         channel.channelType = determineChannelType(parentService);
         channel.idType = determineIdType(instance);
@@ -61,8 +68,10 @@ public class DvbIChannelAdapter {
         channel.terminalChannel = determineTerminalChannel(instance);
         channel.serviceInstances = null;
         channel.parentService = parentService;
-        channel.appParallelUri = determineApps(instance, parentService, "urn:dvb:metadata:cs:LinkedApplicationCS:2019:1.1");
-        channel.appControlUri = determineApps(instance, parentService, "urn:dvb:metadata:cs:LinkedApplicationCS:2019:1.2");
+        channel.appParallelUri = determineApps(instance, parentService, DvbIClient.LINKED_APP_SCHEME_1_1);
+        channel.appControlUri = determineApps(instance, parentService, DvbIClient.LINKED_APP_SCHEME_1_2);
+        channel.appInactiveUri = determineApps(instance, parentService, DvbIClient.LINKED_APP_SCHEME_2);
+        channel.outOfServiceImage = determineApps(instance, parentService, DvbIClient.LINKED_APP_SCHEME_1000_1);
         return channel;
     }
 
@@ -77,7 +86,8 @@ public class DvbIChannelAdapter {
             String howRelatedHref = relatedMaterial.getHowRelatedHref();
             String mediaLocatorContentType = relatedMaterial.getMediaLocatorContentType();
             if (howRelatedHref != null && mediaLocatorContentType != null &&
-                    relatedMaterial.isXmlAitContentType() && appType.equals(howRelatedHref)) {
+                    (relatedMaterial.isXmlAitContentType() || DvbIClient.LINKED_APP_SCHEME_1000_1.equals(howRelatedHref)) &&
+                    appType.equals(howRelatedHref)) {
                 String xmlUri = relatedMaterial.getMediaLocatorUri();
                 if (xmlUri != null && !xmlUri.isEmpty()) {
                     uris.add(xmlUri);
@@ -94,8 +104,9 @@ public class DvbIChannelAdapter {
             String howRelatedHref = relatedMaterial.getHowRelatedHref();
             String mediaLocatorContentType = relatedMaterial.getMediaLocatorContentType();
             if (howRelatedHref != null && mediaLocatorContentType != null &&
-                    howRelatedHref.startsWith("urn:dvb:metadata:cs:LinkedApplicationCS:2019") &&
-                    relatedMaterial.isXmlAitContentType() && appType.equals(howRelatedHref)) {
+                    ((howRelatedHref.startsWith("urn:dvb:metadata:cs:LinkedApplicationCS") &&
+                    relatedMaterial.isXmlAitContentType() || DvbIClient.LINKED_APP_SCHEME_1000_1.equals(howRelatedHref)) &&
+                    appType.equals(howRelatedHref))) {
                 String xmlUri = relatedMaterial.getMediaLocatorUri();
                 if (xmlUri != null && !xmlUri.isEmpty()) {
                     uris.add(xmlUri);
@@ -362,6 +373,10 @@ public class DvbIChannelAdapter {
     public List<String> getAppControlUris() {
         return appControlUri;
     }
+
+    public List<String> getAppInactiveUris() { return appInactiveUri; }
+
+    public List<String> getOutOfServiceImages() { return outOfServiceImage; }
 
     @Override
     public String toString() {

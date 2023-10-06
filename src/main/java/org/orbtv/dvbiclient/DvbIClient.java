@@ -2,12 +2,8 @@ package org.orbtv.dvbiclient;
 
 
 import android.content.Context;
-import android.media.tv.TvContract;
 import android.util.Log;
 import android.view.View;
-import android.os.Handler;
-import android.os.Looper;
-import android.os.HandlerThread;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -28,12 +24,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.List;
-import java.util.TimeZone;
-import java.util.concurrent.TimeUnit;
-import java.text.ParseException;
 
 public class DvbIClient {
     public static final String TYPE_DVB_I = "TYPE_DVB_I";
@@ -48,11 +38,8 @@ public class DvbIClient {
 
     public static final String LINKED_APP_SCHEME_1_1 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:1.1";
     public static final String LINKED_APP_SCHEME_1_2 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:1.2";
-
-    public static final int DELIVERY_TYPE_BROADCAST = 0;
-    public static final int DELIVERY_TYPE_BROADBAND = 1;
-    public static final int DELIVERY_TYPE_DATA = 2;
-    public static final int DELIVERY_TYPE_UNKNOWN = -1;
+    public static final String LINKED_APP_SCHEME_2 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:2";
+    public static final String LINKED_APP_SCHEME_1000_1 = "urn:dvb:metadata:cs:HowRelatedCS:2020:1000.1";
 
     private static final Map<String, Integer> HBBTV_CHANNEL_STATUS_LOOKUP = new HashMap<String, Integer>() {{
         // key names according to the events received from Javascript interface in DvbIView,
@@ -73,29 +60,82 @@ public class DvbIClient {
     private ServiceListDiscoveryTask mLastDiscoveryTask = null;
     private DvbIDatabaseHandler mDbHandler;
     private DvbIService mLastService;
-    private DvbIServiceInstance mLastServiceInstace;
     private final ArrayList<DvbCallback> mDvbCallbacks = new ArrayList<>();
     private final ArrayList<HbbTVCallback> mHbbTVCallbacks = new ArrayList<>();
     private final ArrayList<BroadcastCallback> mBroadcastCallbacks = new ArrayList<>();
     private final ArrayList<StreamEventCallback> mStreamEventCallbacks = new ArrayList<>();
     private ProcessXmlAitCallback processXmlAitCallback;
     private Boolean mReadyForApps = false;
-    private Handler mInstanceCheckHandler;
-    private HandlerThread mInstanceCheckThread;
+    private DvbIService.Callback mServiceCallback = new DvbIService.Callback() {
+        @Override
+        public void onInstanceChanged(DvbIService service, DvbIServiceInstance fromInstance, DvbIServiceInstance toInstance) {
+            DvbIChannelAdapter channel;
+            if (service != null && mLastService == service) {
+                synchronized (mLastService) {
+                    if (toInstance != null) {
+                        Log.i(TAG, "--------- active instance ---------\n" + toInstance + "\n---------------------------");
+                        String uri = toInstance.getUri();
+                        channel = DvbIChannelAdapter.createChannel(mLastService, toInstance);
+                        Log.i(TAG, "---------- channel info ----------\n" + channel + "\n------------------------------------");
+                        if (channel.getAppControlUris().isEmpty()) {
+                            if (toInstance.getDeliveryType().equals("dvb-dash")) {
+                                if (mDvbIView.tune(uri)) {
+                                    dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
+                                    mReadyForApps = true;
+                                }
+                            } else {
+                                mDvbIView.tuneOff();
+                                mReadyForApps = true;
+                                for (BroadcastCallback callback : mBroadcastCallbacks) {
+                                    callback.onTune(toInstance.getTriplet().toString());
+                                }
+                            }
+                        } else {
+                            for (DvbIClient.BroadcastCallback cb : mBroadcastCallbacks) {
+                                cb.onTuneOff();
+                            }
+                            mDvbIView.tuneOff();
+                            dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
+                            dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_PLAYING);
 
-    private Runnable mInstanceCheckRunnable = null;
+                            Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_1_2 + "' from Related Materials (" + channel.getAppControlUris().get(0) + ")");
+                            new GetXmlAitTask().execute(new XmlAitAttributes(channel.getAppControlUris().get(0), LINKED_APP_SCHEME_1_2));
+                        }
 
-    private long convertToMillis(String timeString) {
-        try {
-            SimpleDateFormat format = new SimpleDateFormat("HH:mm:ss'Z'");
-            format.setTimeZone(TimeZone.getTimeZone("UTC"));
-            Date date = format.parse(timeString);
-            return date.getTime();
-        } catch (ParseException e) {
-            e.printStackTrace();
-            return 0;
+                        if (toInstance != null) {
+                            int index = mLastService.getInstances().indexOf(toInstance);
+                            for (HbbTVCallback handler : mHbbTVCallbacks) {
+                                handler.onServiceInstanceChange(index);
+                            }
+                        }
+                    } else {
+                        Log.i(TAG, "No service instance is currently available.");
+                        for (DvbIClient.BroadcastCallback cb : mBroadcastCallbacks) {
+                            cb.onTuneOff();
+                        }
+                        mDvbIView.tuneOff();
+                        channel = DvbIChannelAdapter.createChannel(mLastService, fromInstance);
+                        dispatchPlayerStatusChangedEvent(
+                                channel.getOnid(),
+                                channel.getTsid(),
+                                channel.getSid(),
+                                PLAYER_STATUS_STARTING
+                        );
+                        if (!channel.getAppInactiveUris().isEmpty()) {
+                            Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_2 + "' from Related Materials (" + channel.getAppInactiveUris().get(0) + ")");
+                            new GetXmlAitTask().execute(new XmlAitAttributes(channel.getAppInactiveUris().get(0), LINKED_APP_SCHEME_2));
+                        } else if (!channel.getOutOfServiceImages().isEmpty()) {
+                            Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_1000_1 + "' from Related Materials (" + channel.getOutOfServiceImages().get(0) + ")");
+                            mDvbIView.getContext().getMainExecutor().execute(() -> {
+                                mDvbIView.setVisibility(View.VISIBLE);
+                                mDvbIView.loadUrl(channel.getOutOfServiceImages().get(0));
+                            });
+                        }
+                    }
+                }
+            }
         }
-    }
+    };
 
     private class XmlAitAttributes {
         public String xml;
@@ -134,9 +174,9 @@ public class DvbIClient {
                     Log.i(TAG, "Received video event " + eventName);
 
                     if (mReadyForApps && eventName.equals(PLAYER_STATUS_PLAYING) && processXmlAitCallback != null) {
-                        List<String> appUri = DvbIChannelAdapter.createChannel(mLastService, mLastServiceInstace).getAppParallelUris();
+                        List<String> appUri = DvbIChannelAdapter.createChannel(mLastService, mLastService.getTunedInstance()).getAppParallelUris();
                         if (!appUri.isEmpty()) {
-                            Log.i(TAG, "Found Hbbtv App from Related Materials (" + appUri + ")");
+                            Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_1_1 + "' from Related Materials (" + appUri + ")");
                             new GetXmlAitTask().execute(new XmlAitAttributes(appUri.get(0), LINKED_APP_SCHEME_1_1));
                         }
                     }
@@ -210,40 +250,6 @@ public class DvbIClient {
             Log.e(TAG, "Error fetching XML AIT", e);
         }
         return null;
-    }
-
-    private synchronized void startInstanceCheckThread() {
-        if (mLastServiceInstace != null && mLastServiceInstace.getAvailabilityPeriod() != null) {
-            if (mInstanceCheckThread == null) {
-                mInstanceCheckThread = new HandlerThread("InstanceCheckThread");
-                mInstanceCheckThread.start();
-                mInstanceCheckHandler = new Handler(mInstanceCheckThread.getLooper());
-            }
-
-            if (mInstanceCheckRunnable != null) {
-                mInstanceCheckHandler.removeCallbacks(mInstanceCheckRunnable);
-            }
-            mInstanceCheckRunnable = new AvailabilityPeriodRunnable();
-            mInstanceCheckHandler.post(mInstanceCheckRunnable);
-        } else {
-            Log.i(TAG, "No availability period for the current service instance.");
-        }
-    }
-
-    private synchronized void stopInstanceCheckThread() {
-        if (mInstanceCheckHandler != null && mInstanceCheckRunnable != null) {
-            mInstanceCheckHandler.removeCallbacks(mInstanceCheckRunnable);
-            mInstanceCheckRunnable = null;
-        }
-        if (mInstanceCheckThread != null) {
-            mInstanceCheckThread.quitSafely();
-            try {
-                mInstanceCheckThread.join();
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-            mInstanceCheckThread = null;
-        }
     }
 
     private DvbIClient(Context context) {
@@ -322,36 +328,31 @@ public class DvbIClient {
         return mDvbIView;
     }
 
-    public int tune(String uid, int instanceIndex) {
-        mLastService = mDbHandler.getServiceForUID(uid);
-        mLastServiceInstace = null;
-        mReadyForApps = false;
-        Log.i(TAG, "---------- Tuning to service ----------\n" + mLastService + "\n------------------------------------");
+    public synchronized boolean tune(String uid, int instanceIndex) {
         if (mLastService != null) {
-            DvbIServiceInstance maxPriorityInstance = null;
-            if (instanceIndex < 0) {
-                for (int i = 0; i < mLastService.getInstances().size(); i++) {
-                    DvbIServiceInstance instance = mLastService.getInstances().get(i);
-                    if (maxPriorityInstance == null || maxPriorityInstance.getPriority() > instance.getPriority()) {
-                        maxPriorityInstance = instance;
-                    }
-                }
-            }
-            else {
-                maxPriorityInstance = mLastService.getInstances().get(instanceIndex);
-            }
-
-            return tuneToServiceInstance(maxPriorityInstance);
+            mLastService.setCallback(null);
+            mLastService.tuneOff();
         }
-        Log.i(TAG, "Failed to tune to service.");
-        return DELIVERY_TYPE_UNKNOWN;
+        mLastService = mDbHandler.getServiceForUID(uid);
+        mReadyForApps = false;
+        if (mLastService != null) {
+            Log.i(TAG, "---------- Tuning to service ----------\n" + mLastService + "\n------------------------------------");
+            mLastService.setCallback(mServiceCallback);
+            mLastService.tune(instanceIndex);
+        }
+        else {
+            Log.i(TAG, "No service found with UID: " + uid);
+        }
+        return mLastService != null;
     }
 
-    public void tuneOff() {
-        mLastService = null;
-        mLastServiceInstace = null;
+    public synchronized void tuneOff() {
+        if (mLastService != null) {
+            mLastService.setCallback(null);
+            mLastService.tuneOff();
+            mLastService = null;
+        }
         mDvbIView.tuneOff();
-        stopInstanceCheckThread();
     }
 
     public void setPresentationSuspended(boolean suspend) {
@@ -359,7 +360,12 @@ public class DvbIClient {
     }
 
     public void setVideoRectangle(int x, int y, int width, int height) {
-        if (mLastServiceInstace != null && mLastServiceInstace.getDeliveryType().equals("dvb-dash")) {
+        String deliveryType = "";
+        try {
+            deliveryType = mLastService.getTunedInstance().getDeliveryType();
+        }
+        catch (NullPointerException e) { }
+        if (deliveryType.equals("dvb-dash")) {
             Log.i(TAG, "Setting video rectangle to " + x + ", " + y + ", " + width + ", " + height);
             mDvbIView.setVideoRectangle(x, y, width, height);
             for (DvbCallback handler : mDvbCallbacks) {
@@ -432,114 +438,6 @@ public class DvbIClient {
         }
         for (DvbCallback handler : mDvbCallbacks) {
             handler.onPlayerStatusChanged(event);
-        }
-    }
-
-    private int tuneToServiceInstance(DvbIServiceInstance instance) {
-        boolean isNewInstance = false;
-        int result = DELIVERY_TYPE_UNKNOWN;
-        if (instance != mLastServiceInstace) {
-            stopInstanceCheckThread();
-            isNewInstance = true;
-            mLastServiceInstace = instance;
-        }
-
-        if (instance != null && mLastService != null) {
-            int index = mLastService.getInstances().indexOf(instance);
-            String uri = instance.getUri();
-            Log.i(TAG, "Max priority instance of type " + instance.getDeliveryType());
-
-            DvbIChannelAdapter channel = DvbIChannelAdapter.createChannel(mLastService, instance);
-            Log.i(TAG, "---------- channel info ----------\n" + channel + "\n------------------------------------");
-            if (channel.getAppControlUris().isEmpty()) {
-                if (instance.getDeliveryType().equals("dvb-dash")) {
-                    if (mDvbIView.tune(uri)) {
-                        dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
-                        mReadyForApps = true;
-                        if (isNewInstance) {
-                            for (HbbTVCallback handler : mHbbTVCallbacks) {
-                                handler.onServiceInstanceChange(index);
-                            }
-                        }
-                        result = DELIVERY_TYPE_BROADBAND;
-                    }
-                } else {
-                    mDvbIView.tuneOff();
-                    mReadyForApps = true;
-                    for (BroadcastCallback callback : mBroadcastCallbacks) {
-                        callback.onTune(instance.getTriplet().toString());
-                    }
-                    if (isNewInstance) {
-                        for (HbbTVCallback handler : mHbbTVCallbacks) {
-                            handler.onServiceInstanceChange(index);
-                        }
-                    }
-                    result = DELIVERY_TYPE_BROADCAST;
-                }
-                if (isNewInstance) {
-                    startInstanceCheckThread();
-                }
-            }
-            else {
-                mDvbIView.tuneOff();
-                dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
-                dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_PLAYING);
-
-                Log.i(TAG, "Found Hbbtv App from Related Materials (" + channel.getAppControlUris().get(0) + ")");
-                new GetXmlAitTask().execute(new XmlAitAttributes(channel.getAppControlUris().get(0), LINKED_APP_SCHEME_1_2));
-                result = DELIVERY_TYPE_DATA;
-            }
-        }
-        return result;
-    }
-
-    private class AvailabilityPeriodRunnable implements Runnable {
-        DvbIServiceInstance boundServiceInstance;
-        private List<String> mServiceStartTimes;
-        private List<String> mServiceEndTimes;
-        private int mLastCheckedIndex;
-
-        AvailabilityPeriodRunnable() {
-            boundServiceInstance = mLastServiceInstace;
-            mServiceStartTimes = mLastServiceInstace.getAvailabilityPeriod().getStartTimes();
-            mServiceEndTimes = mLastServiceInstace.getAvailabilityPeriod().getEndTimes();
-            mLastCheckedIndex = 0;
-        }
-
-        @Override
-        public void run() {
-            long currentTimeMillis = System.currentTimeMillis() % 86400000; // TODO: may need to remove modulo operation
-            if (mLastCheckedIndex < mServiceStartTimes.size()) {
-                long nextStartTimeMillis = convertToMillis(mServiceStartTimes.get(mLastCheckedIndex));
-                long nextEndTimeMillis = convertToMillis(mServiceEndTimes.get(mLastCheckedIndex));
-
-                if (currentTimeMillis >= nextStartTimeMillis && currentTimeMillis <= nextEndTimeMillis) {
-                    Log.i(TAG, "Service instance is active.");
-                    tuneToServiceInstance(boundServiceInstance);
-                    mInstanceCheckHandler.postDelayed(this, nextEndTimeMillis - currentTimeMillis + 1);
-                } else if (currentTimeMillis < nextStartTimeMillis) {
-                    Log.i(TAG, "Service instance is not active.");
-                    for (BroadcastCallback cb : mBroadcastCallbacks) {
-                        cb.onTuneOff();
-                    }
-                    synchronized (mDvbIView) {
-                        mDvbIView.tuneOff();
-                        DvbIChannelAdapter channel = DvbIChannelAdapter.createChannel(mLastService, boundServiceInstance);
-                        dispatchPlayerStatusChangedEvent(
-                            channel.getOnid(),
-                            channel.getTsid(),
-                            channel.getSid(),
-                            PLAYER_STATUS_STARTING
-                        );
-                    }
-                    mInstanceCheckHandler.postDelayed(this, nextStartTimeMillis - currentTimeMillis);
-                } else {
-                    mLastCheckedIndex++;
-                    mInstanceCheckHandler.post(this); // Check the next time period immediately
-                }
-            } else {
-                Log.i(TAG, "Service instance is not active.");
-            }
         }
     }
 

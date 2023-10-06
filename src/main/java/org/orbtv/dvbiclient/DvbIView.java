@@ -61,7 +61,7 @@ public class DvbIView extends WebView {
             @Override
             public void onPageFinished(WebView view, String url) {
                 Log.i(TAG, "onPageFinished " + url + "...");
-                if (!url.equals("about:blank")) {
+                if (DVBI_PAGE.equals(url)) {
                     synchronized (mPageLoaded) {
                         evaluateJavascript("orb_loadMedia('" + mLastUrl + "')", null);
                         mPageLoaded = true;

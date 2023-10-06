@@ -1,19 +1,15 @@
 package org.orbtv.dvbiclient;
 
-import org.json.JSONException;
-import org.json.JSONObject;
+import android.util.Log;
+
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserFactory;
-import org.xmlpull.v1.XmlPullParserException;
 
 import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.LinkedHashMap;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -139,16 +135,80 @@ class ServiceList {
 
 
 public class DvbIService {
+    private static final String TAG = DvbIService.class.getSimpleName();
     private String uniqueIdentifier;
     private String providerName;
     private String serviceType;
     private Triplet triplet;
     private List<RelatedMaterial> relatedMaterials = new ArrayList<>();
     private List<DvbIServiceInstance> instances = new ArrayList<>();
+    private DvbIServiceInstance tunedInstance = null;
     private Map<String, String> serviceNames = new HashMap<>();
     private String lcnNumber;
     private boolean selectable;
     private boolean visible;
+    private Callback callback = null;
+    private AvailabilityPeriodRunnable availabilityPeriodRunnable = null;
+    private Thread availabilityPeriodThread = null;
+    private Object lock = new Object();
+
+    private class AvailabilityPeriodRunnable implements Runnable {
+        private volatile boolean isRunning = false;
+        private DvbIServiceInstance targetInstance;
+        private DvbIService service;
+
+        public AvailabilityPeriodRunnable(DvbIService service, DvbIServiceInstance targetInstance) {
+            this.service = service;
+            this.targetInstance = targetInstance;
+        }
+
+        public void stop() {
+            isRunning = false;
+            Log.i(TAG, "Stopping AvailabilityPeriodRunnable...");
+        }
+
+        @Override
+        public void run() {
+            DvbIServiceInstance tunedInstance = null;
+            isRunning = true;
+            while (isRunning) {
+                synchronized (lock) {
+                    tunedInstance = service.tunedInstance;
+                    if (targetInstance == null) {
+                        DvbIServiceInstance priorityInstance = service.getMaxPriorityInstance();
+                        if (priorityInstance != tunedInstance) {
+                            service.tunedInstance = priorityInstance;
+                            if (callback != null) {
+                                callback.onInstanceChanged(service, tunedInstance, priorityInstance);
+                            }
+                        }
+                    }
+                    else if ((tunedInstance == null) == targetInstance.isAvailable()){
+                        if (tunedInstance != null) {
+                            service.tunedInstance = null;
+                        }
+                        else {
+                            service.tunedInstance = targetInstance;
+                        }
+                        if (callback != null) {
+                            callback.onInstanceChanged(service, tunedInstance, service.tunedInstance);
+                        }
+                    }
+                }
+
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+            Log.i(TAG, "Stopped AvailabilityPeriodRunnable.");
+        }
+    }
+
+    public interface Callback {
+        void onInstanceChanged(DvbIService service, DvbIServiceInstance fromInstance, DvbIServiceInstance toInstance);
+    }
 
     private DvbIService() { }
 
@@ -206,6 +266,52 @@ public class DvbIService {
         }
         return services;
     }
+
+    public DvbIServiceInstance tune(int instanceIndex) {
+        DvbIServiceInstance instance = null;
+        tuneOff();
+        if (instanceIndex < 0) {
+            instance = getMaxPriorityInstance();
+        }
+        else if (instanceIndex < instances.size()) {
+            instance = instances.get(instanceIndex);
+        }
+        else {
+            Log.i(TAG, "No instance with index " + instanceIndex + " found in service.");
+            return null;
+        }
+        synchronized (lock) {
+            tunedInstance = instance;
+            if (callback != null) {
+                callback.onInstanceChanged(this, null, instance);
+            }
+            if (instanceIndex >= 0) {
+                if (instance.getAvailabilityPeriod() != null && !instance.getAvailabilityPeriod().getStartTimes().isEmpty()) {
+                    startInstanceAvailabilityThread(instance);
+                }
+            }
+            else {
+                startInstanceAvailabilityThread(null);
+            }
+        }
+        return instance;
+    }
+
+    public void tuneOff() {
+        stopInstanceAvailabilityThread();
+        synchronized (lock) {
+            tunedInstance = null;
+        }
+    }
+
+    public synchronized DvbIServiceInstance getTunedInstance() {
+        return tunedInstance;
+    }
+
+    public synchronized void setCallback(Callback cb) {
+        callback = cb;
+    }
+
     @Override
     public String toString() {
         String ret = "- " + this.getClass().getSimpleName() + " " + uniqueIdentifier + " -"
@@ -219,6 +325,33 @@ public class DvbIService {
             ret += "\n" + instance.toString();
         }
         return ret;
+    }
+
+    private DvbIServiceInstance getMaxPriorityInstance() {
+        DvbIServiceInstance maxInstance = null;
+        for (int i = 0; i < instances.size(); i++) {
+            DvbIServiceInstance instance = instances.get(i);
+            if (instance.isAvailable() && (maxInstance == null || maxInstance.getPriority() > instance.getPriority())) {
+                maxInstance = instance;
+            }
+        }
+        return maxInstance;
+    }
+
+    private synchronized void startInstanceAvailabilityThread(DvbIServiceInstance targetInstance) {
+        if (availabilityPeriodRunnable == null) {
+            availabilityPeriodRunnable = new AvailabilityPeriodRunnable(this, targetInstance);
+            availabilityPeriodThread = new Thread(availabilityPeriodRunnable);
+            availabilityPeriodThread.start();
+        }
+    }
+
+    private synchronized void stopInstanceAvailabilityThread() {
+        if (availabilityPeriodRunnable != null) {
+            availabilityPeriodRunnable.stop();
+            availabilityPeriodThread = null;
+            availabilityPeriodRunnable = null;
+        }
     }
 
     private static void parseAdditionalParameters(DvbIService service, XmlPullParser xpp) throws Exception {
@@ -248,7 +381,7 @@ public class DvbIService {
         return relatedMaterials;
     }
 
-    public List<DvbIServiceInstance> getInstances() {
+    public synchronized List<DvbIServiceInstance> getInstances() {
         return instances;
     }
 
