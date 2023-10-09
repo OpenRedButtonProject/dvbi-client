@@ -62,17 +62,15 @@ public class DvbIClient {
     private DvbIService mLastService;
     private final ArrayList<DvbCallback> mDvbCallbacks = new ArrayList<>();
     private final ArrayList<HbbTVCallback> mHbbTVCallbacks = new ArrayList<>();
-    private final ArrayList<BroadcastCallback> mBroadcastCallbacks = new ArrayList<>();
-    private final ArrayList<StreamEventCallback> mStreamEventCallbacks = new ArrayList<>();
-    private ProcessXmlAitCallback processXmlAitCallback;
+    private final ArrayList<Callback> mCallbacks = new ArrayList<>();
     private Boolean mReadyForApps = false;
     private DvbIService.Callback mServiceCallback = new DvbIService.Callback() {
         private void tuneOffBroadcast() {
-            for (BroadcastCallback cb : mBroadcastCallbacks) {
-                cb.onTuneOff();
+            for (Callback cb : mCallbacks) {
+                cb.onBroadcastTuneOff();
             }
         }
-        
+
         @Override
         public void onInstanceChanged(DvbIService service, DvbIServiceInstance fromInstance, DvbIServiceInstance toInstance) {
             DvbIChannelAdapter channel;
@@ -93,8 +91,8 @@ public class DvbIClient {
                             } else {
                                 mDvbIView.tuneOff();
                                 mReadyForApps = true;
-                                for (BroadcastCallback callback : mBroadcastCallbacks) {
-                                    callback.onTune(toInstance.getTriplet().toString());
+                                for (Callback callback : mCallbacks) {
+                                    callback.onBroadcastTune(toInstance.getTriplet().toString());
                                 }
                             }
                         } else {
@@ -151,14 +149,6 @@ public class DvbIClient {
         }
     }
 
-    public interface ProcessXmlAitCallback {
-        void processXmlAit(String xmlAit, String scheme);
-    }
-
-    public interface StreamEventCallback {
-        void onStreamEvent(int listenId, String name, String status);
-    }
-
     private final DvbIView.JSCallback mJSCallback = new DvbIView.JSCallback() {
         @Override
         public void onVideoEvent(String eventName, JSONObject data) {
@@ -176,7 +166,7 @@ public class DvbIClient {
                     dispatchPlayerStatusChangedEvent(onid, tsid, sid, eventName);
                     Log.i(TAG, "Received video event " + eventName);
 
-                    if (mReadyForApps && eventName.equals(PLAYER_STATUS_PLAYING) && processXmlAitCallback != null) {
+                    if (mReadyForApps && eventName.equals(PLAYER_STATUS_PLAYING)) {
                         List<String> appUri = DvbIChannelAdapter.createChannel(mLastService, mLastService.getTunedInstance()).getAppParallelUris();
                         if (!appUri.isEmpty()) {
                             Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_1_1 + "' from Related Materials (" + appUri + ")");
@@ -188,8 +178,8 @@ public class DvbIClient {
                     for (Map.Entry<Integer, String> entry : mStreamEventsLookup.entrySet()) {
                         if (entry.getValue().equals(eventName)) {
                             try {
-                                for (StreamEventCallback cb : mStreamEventCallbacks) {
-                                    cb.onStreamEvent(
+                                for (Callback cb : mCallbacks) {
+                                    cb.onDashStreamEvent(
                                             entry.getKey(),
                                             data.getJSONObject("eventStream").getString("value"),
                                             "trigger"
@@ -201,9 +191,12 @@ public class DvbIClient {
                         }
                     }
                     if (PLAYER_EVENT_APP_SIGNALLING.equals(eventName)) {
-                        if (processXmlAitCallback != null && data != null) {
+                        if (data != null) {
                             try {
-                                processXmlAitCallback.processXmlAit(data.getString("messageData"), LINKED_APP_SCHEME_1_1);
+                                String messageData = data.getString("messageData");
+                                for (Callback cb : mCallbacks) {
+                                    cb.onProcessXmlAit(messageData, LINKED_APP_SCHEME_1_1);
+                                }
                                 mReadyForApps = false;
                             } catch (JSONException e) {
                                 e.printStackTrace();
@@ -224,8 +217,10 @@ public class DvbIClient {
     
         @Override
         protected void onPostExecute(XmlAitAttributes result) {
-            if (processXmlAitCallback != null && result != null) {
-                processXmlAitCallback.processXmlAit(result.xml, result.scheme);
+            if (result != null) {
+                for (Callback cb : mCallbacks) {
+                    cb.onProcessXmlAit(result.xml, result.scheme);
+                }
                 mReadyForApps = false;
             }
         }
@@ -291,28 +286,14 @@ public class DvbIClient {
         mHbbTVCallbacks.remove(handler);
     }
 
-    public synchronized void addBroadcastCallback(BroadcastCallback handler) {
-        if (!mBroadcastCallbacks.contains(handler)) {
-            mBroadcastCallbacks.add(handler);
+    public synchronized void registerCallback(Callback handler) {
+        if (!mCallbacks.contains(handler)) {
+            mCallbacks.add(handler);
         }
     }
 
-    public synchronized void removeBroadcastCallback(BroadcastCallback handler) {
-        mBroadcastCallbacks.remove(handler);
-    }
-
-    public synchronized void addStreamEventCallback(StreamEventCallback handler) {
-        if (!mStreamEventCallbacks.contains(handler)) {
-            mStreamEventCallbacks.add(handler);
-        }
-    }
-
-    public synchronized void removeStreamEventCallback(StreamEventCallback handler) {
-        mStreamEventCallbacks.remove(handler);
-    }
-
-    public synchronized void setProcessXmlAitCallback(ProcessXmlAitCallback callback) {
-        this.processXmlAitCallback = callback;
+    public synchronized void unregisterCallback(Callback handler) {
+        mCallbacks.remove(handler);
     }
 
     public synchronized boolean subscribeStreamEvent(int listenId, String targetUrl, String eventName) {
@@ -516,8 +497,11 @@ public class DvbIClient {
         }
     }
 
-    public interface BroadcastCallback {
-        void onTune(String uri);
-        void onTuneOff();
+    public static class Callback {
+        protected void onBroadcastTune(String uri) { }
+        protected void onBroadcastTuneOff() { }
+        protected void onProcessXmlAit(String xmlAit, String scheme) { }
+        protected void onDashStreamEvent(int listenId, String name, String status) { }
+        protected void onDashTracksUpdated() { }
     }
 }
