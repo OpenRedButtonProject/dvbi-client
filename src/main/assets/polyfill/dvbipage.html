@@ -27,11 +27,98 @@
             });
 
             player.on('urn:dvb:dash:appsignalling:2016', function (payload) {
-                //payload.event.messageData = payload.event.messageData.replace("hbbtv1.test/_TESTSUITE/TESTS", "192.168.1.33/hbbtv_tests");
-                //payload.event.messageData = payload.event.messageData.replace(".html5", ".html");
-                console.log(payload.event);
+                //payload.event.messageData = payload.event.messageData.replace(/hbbtv1.test\/_TESTSUITE\/TESTS/g, "192.168.1.179/hbbtv_tests");
+                //payload.event.messageData = payload.event.messageData.replace(/.html5/g, ".html");
+                console.log(payload);
                 Android.onVideoEvent(payload.type, JSON.stringify(payload.event));
             });
+
+            player.on('currentTrackChanged', (e) => {
+                e.newMediaInfo.selected = true;
+                if (e.oldMediaInfo) {
+                    e.oldMediaInfo.selected = false;
+                }
+                Android.onVideoEvent('DVBI_TRACK_CHANGED', JSON.stringify(e.newMediaInfo));
+            });
+
+            function updateTracks() {
+                function extractKindFromVideoTrack(track) {
+                    if (track.roles) {
+                        if (track.roles.length === 1) {
+                            switch (track.roles[0]) {
+                                case 'alternate':
+                                    return 'alternative';
+                                case 'main':
+                                    return 'main';
+                                case 'commentary':
+                                    return 'commentary';
+                                default:
+                                    break;
+                            }
+                        } else if (track.roles.length === 2) {
+                            if (track.roles.includes('subtitle') && track.roles.includes('main')) {
+                                return 'subtitles';
+                            }
+                            if (track.roles.includes('caption') && track.roles.includes('main')) {
+                                return 'captions';
+                            }
+                        }
+                    }
+                    return '';
+                }
+                function extractKindFromAudioTrack(track) {
+                    if (track.roles) {
+                        if (track.roles.length === 1) {
+                            switch (track.roles[0]) {
+                                case 'alternate':
+                                    return 'alternative';
+                                case 'main':
+                                    return 'main';
+                                case 'commentary':
+                                    return 'commentary';
+                                default:
+                                    break;
+                            }
+                        } else if (track.roles.length === 2) {
+                            if (
+                                track.roles.includes('description') &&
+                                track.roles.includes('supplementary')
+                            ) {
+                                return 'descriptions';
+                            }
+                            if (track.roles.includes('description') && track.roles.includes('main')) {
+                                return 'main-desc';
+                            }
+                            if (track.roles.includes('dub') && track.roles.includes('main')) {
+                                return 'translation';
+                            }
+                        }
+                    }
+                    return '';
+                }
+                const curAudio = player.getCurrentTrackFor('audio');
+                const curVideo = player.getCurrentTrackFor('video');
+                const curText = player.getCurrentTrackFor('text');
+                var tracks = {
+                    audio: player.getTracksFor('audio').map(track => {
+                        track.kind = extractKindFromAudioTrack(track);
+                        track.selected = track === curAudio;
+                        return track;
+                    }),
+                    video: player.getTracksFor('video').map(track => {
+                        track.kind = extractKindFromVideoTrack(track);
+                        track.selected = track === curVideo;
+                        return track;
+                    }),
+                    text: player.getTracksFor('text').map(track => {
+                        track.selected = track === curText;
+                        return track;
+                    })
+                };
+                Android.onVideoEvent('DVBI_TRACKS_UPDATED', JSON.stringify(tracks));
+            }
+            player.on('tracksChanged', updateTracks);
+            player.on('streamInitialized', updateTracks);
         }
         function orb_loadMedia(url) {
             if (lastSource !== url) {
@@ -42,6 +129,14 @@
                 if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
                     Android.onVideoEvent('DVBI_PLAYBACK_PLAYING', JSON.stringify({}));
                 }
+            }
+        }
+        function orb_selectTrack(type, id) {
+            var track = player
+                .getTracksFor(type)
+                .find((track) => track.id === id);
+            if (track) {
+                player.setCurrentTrack(track);
             }
         }
         function setVideoRectangle(x, y, width, height) {

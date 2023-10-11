@@ -127,6 +127,12 @@ public class DvbIView extends WebView {
         });
     }
 
+    public void selectTrack(String type, String id) {
+        mContext.getMainExecutor().execute(() -> {
+            evaluateJavascript("orb_selectTrack('" + type + "'," + id + ")", null);
+        });
+    }
+
     public void setPresentationSuspended(boolean suspend) {
         synchronized (mIsSuspended) {
             if (mIsSuspended != suspend) {
