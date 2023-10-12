@@ -490,8 +490,62 @@ public class DvbIClient {
         return ret;
     }
 
+    public synchronized DvbIService getTunedService() {
+        return mLastService;
+    }
+
+    /**
+     * Get the service stored in the database by its UID.
+     * NOTE: Calling the method with the same UID will return each time
+     * a new instance
+     * @param uid
+     * @return
+     */
     public DvbIService getServiceByUID(String uid) {
-        return mDbHandler.getServiceForUID(uid);
+        if (uid != null) {
+            return mDbHandler.getServiceForUID(uid);
+        }
+        return null;
+    }
+
+    public List<Component> getListOfComponents(int type) {
+        ArrayList<Component> components = new ArrayList<>();
+        boolean all = !TRACK_TYPE_LOOKUP.containsKey(type);
+        for (TvTrackInfo track : mTracks) {
+            if (all || track.getType() == type) {
+                int pid = Integer.parseInt(track.getId().split(":")[0]);
+                Component component = new Component(
+                        track.getType(),
+                        track.getId(),
+                        pid,
+                        pid,
+                        track.getEncoding(),
+                        track.isEncrypted(),
+                        mSelectedTracks.get(track.getType()) == track,
+                        false
+                );
+                switch (track.getType()) {
+                    case TvTrackInfo.TYPE_AUDIO:
+                        component.audioDescription = track.isAudioDescription();
+                        component.audioChannels = track.getAudioChannelCount();
+                        component.language = track.getLanguage();
+                        break;
+                    case TvTrackInfo.TYPE_VIDEO:
+                        component.aspectRatio = track.getVideoPixelAspectRatio();
+                        break;
+                    case TvTrackInfo.TYPE_SUBTITLE:
+                        component.language = track.getLanguage();
+                        component.hearingImpaired = track.isHardOfHearing();
+                        // TODO: component.label = ?
+                        break;
+                    default:
+                        Log.e(TAG, "Faulty TvTrackInfo type.");
+                        break;
+                }
+                components.add(component);
+            }
+        }
+        return components;
     }
 
     public boolean startServiceSearch(String serviceListURL) {
@@ -613,6 +667,48 @@ public class DvbIClient {
             }
             mLastDiscoveryTask = null;
         }
+    }
+
+    public static final class Component {
+        private int type;
+        private String id; // Platform-defined ID that is usable with overrideComponentSelection
+        private int componentTag;
+        private int pid;
+        private String encoding;
+        private float aspectRatio; // Video - ASPECT_RATIO_...
+        private String language; // Audio and subtitle
+        private boolean audioDescription; // Audio
+        private int audioChannels; // Audio
+        private boolean hearingImpaired; // Subtitle
+        private boolean encrypted;
+        private boolean active;
+        private boolean hidden;
+        private String label; // Subtitle
+
+        private Component(int type, String id, int componentTag, int pid, String encoding, boolean encrypted, boolean active, boolean hidden) {
+            this.type = type;
+            this.id = id;
+            this.componentTag = componentTag;
+            this.pid = pid;
+            this.encoding = encoding;
+            this.encrypted = encrypted;
+            this.active = active;
+            this.hidden = hidden;
+        }
+        public int getType() { return type; }
+        public String getId() { return id; }
+        public int getComponentTag() { return componentTag; }
+        public int getPid() { return pid; }
+        public String getEncoding() { return encoding; }
+        public float getAspectRatio() { return aspectRatio; }
+        public String getLanguage() { return language; }
+        public boolean isAudioDescription() { return audioDescription; }
+        public int getAudioChannels() { return audioChannels; }
+        public boolean isHearingImpaired() { return hearingImpaired; }
+        public boolean isEncrypted() { return encrypted; }
+        public boolean isActive() { return active; }
+        public boolean isHidden() { return hidden; }
+        public String getLabel() { return label; }
     }
 
     public static class Callback {
