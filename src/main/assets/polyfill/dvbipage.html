@@ -33,6 +33,12 @@
                 Android.onVideoEvent(payload.type, JSON.stringify(payload.event));
             });
 
+            player.on('urn:dvb:iptv:cpm:2014', function (e) {
+                e.event.messageData = e.event.messageData.replace("<BroadcastEvent>", "<BroadcastEvent xmlns:mpeg7='" + e.type + "'>");
+                console.log(e);
+                Android.onVideoEvent(e.type, JSON.stringify(e.event));
+            });
+
             player.on('currentTrackChanged', (e) => {
                 e.newMediaInfo.selected = true;
                 if (e.oldMediaInfo) {
@@ -115,6 +121,7 @@
                         return track;
                     })
                 };
+                console.log(tracks);
                 Android.onVideoEvent('DVBI_TRACKS_UPDATED', JSON.stringify(tracks));
             }
             player.on('tracksChanged', updateTracks);

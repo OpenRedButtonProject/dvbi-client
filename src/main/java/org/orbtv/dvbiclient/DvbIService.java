@@ -2,10 +2,12 @@ package org.orbtv.dvbiclient;
 
 import android.util.Log;
 
+import org.orbtv.companionlibrary.callbacks.HbbTVCallback;
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserFactory;
 
 import java.io.StringReader;
+import java.lang.annotation.Native;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -17,8 +19,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.TimeZone;
 
 class ServiceList {
-    List<DvbIService> services;
+    private String uid;
+    private List<DvbIService> services;
     private List<LCNTable> lcnTables = new ArrayList<>();
+    private List<DvbIContentGuide> contentGuideSources = new ArrayList<>();
     //rest of the members
 
     private static class LCNTable {
@@ -30,6 +34,14 @@ class ServiceList {
             this.lcnEntries = new ArrayList<>();
         }
     }
+
+    public ServiceList(String uid, List<DvbIService> services, List<DvbIContentGuide> contentGuideSources) {
+        this.uid = uid;
+        this.services = services;
+        this.contentGuideSources = contentGuideSources;
+    }
+
+    private ServiceList() { }
 
     private static class LCNEntry {
         private String channelNumber;
@@ -49,8 +61,9 @@ class ServiceList {
         }
     }
 
-    public static ServiceList parseFromXML(String xml, String region) throws Exception {
+    public static ServiceList parseFromXML(String uid, String xml, String region) throws Exception {
         ServiceList serviceList = new ServiceList();
+        serviceList.uid = uid;
 
         XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
         factory.setNamespaceAware(true);
@@ -72,6 +85,8 @@ class ServiceList {
                     boolean visible = Boolean.parseBoolean(xpp.getAttributeValue(null, "visible"));
                     LCNEntry lcnEntry = new LCNEntry(channelNumber, serviceRef, selectable, visible);
                     currentLCNTable.lcnEntries.add(lcnEntry);
+                } else if ("ContentGuideSource".equals(xpp.getName()) || "ContentGuideSourceList".equals(xpp.getName())) {
+                    serviceList.contentGuideSources = DvbIContentGuide.parseSourceFromXML(xpp);
                 } else if ("Service".equals(xpp.getName())) {
                     serviceList.services = DvbIService.parseFromXML(xpp);
                 }
@@ -85,8 +100,16 @@ class ServiceList {
                 service.setLCNNumber(String.valueOf(maxLcn++));
             }
         }
+
+        for (DvbIService service : serviceList.services) {
+            service._updateContentGuide(serviceList.contentGuideSources);
+        }
         return serviceList;
     }
+
+    public List<DvbIService> getServices() { return services; }
+
+    public String getUid() { return uid; }
 
     private int getNextAvailableLcn() {
         int lcn = 0;
@@ -136,12 +159,17 @@ class ServiceList {
 
 public class DvbIService {
     private static final String TAG = DvbIService.class.getSimpleName();
+    public boolean locked = false;
     private String uniqueIdentifier;
     private String providerName;
     private String serviceType;
     private Triplet triplet;
     private List<RelatedMaterial> relatedMaterials = new ArrayList<>();
     private List<DvbIServiceInstance> instances = new ArrayList<>();
+    private DvbIContentGuide contentGuideSource;
+    private String contentGuideSourceRef;
+    private String contentGuideServiceRef;
+    private Integer parentalRating;
     private DvbIServiceInstance tunedInstance = null;
     private Map<String, String> serviceNames = new HashMap<>();
     private String lcnNumber;
@@ -212,7 +240,10 @@ public class DvbIService {
 
     private DvbIService() { }
 
-    public DvbIService(Map<String, String> names, String provider, String uid, String type, String lcn, Triplet triplet, List<DvbIServiceInstance> instances, List<RelatedMaterial> materials) {
+    public DvbIService(Map<String, String> names, String provider, String uid, String type,
+                       String lcn, Triplet triplet, List<DvbIServiceInstance> instances,
+                       List<RelatedMaterial> materials, DvbIContentGuide guide, Integer parentalRating,
+                       String contentGuideServiceRef) {
         this.uniqueIdentifier = uid;
         this.serviceNames = names;
         this.serviceType = type;
@@ -221,6 +252,9 @@ public class DvbIService {
         this.relatedMaterials = materials;
         this.lcnNumber = lcn;
         this.triplet = triplet;
+        this.contentGuideSource = guide;
+        this.parentalRating = parentalRating;
+        this.contentGuideServiceRef = contentGuideServiceRef;
     }
 
     public static List<DvbIService> parseFromXML(XmlPullParser xpp) throws Exception {
@@ -234,6 +268,18 @@ public class DvbIService {
                     services.add(currentService);
                 } else if (currentService != null) {
                     switch (xpp.getName()) {
+                        case "ContentGuideSource":
+                            currentService.contentGuideSource = parseContentGuideSource(xpp);
+                            break;
+                        case "ContentGuideSourceRef":
+                            currentService.contentGuideSourceRef = xpp.nextText();
+                            break;
+                        case "ContentGuideServiceRef":
+                            currentService.contentGuideServiceRef = xpp.nextText();
+                            break;
+                        case "ParentalRating":
+                            currentService.parentalRating = Integer.parseInt(xpp.nextText());
+                            break;
                         case "UniqueIdentifier":
                             currentService.uniqueIdentifier = xpp.nextText();
                             break;
@@ -324,6 +370,10 @@ public class DvbIService {
         for (DvbIServiceInstance instance : instances) {
             ret += "\n" + instance.toString();
         }
+
+        if(contentGuideSource != null) {
+            ret += "\n" + contentGuideSource.toString();
+        }
         return ret;
     }
 
@@ -358,6 +408,24 @@ public class DvbIService {
         String extensionName = xpp.getAttributeValue(null, "extensionName");
         if (extensionName != null && extensionName.equals("urn:hbbtv:dvbi:service:serviceIdentifierTriplet")) {
             service.triplet = Triplet.parseFromXML(xpp);
+        }
+    }
+
+    private static DvbIContentGuide parseContentGuideSource(XmlPullParser xpp) {
+        List<DvbIContentGuide> contentGuideSource = null;
+        try {
+            contentGuideSource = DvbIContentGuide.parseSourceFromXML(xpp);
+        } catch (Exception e) {
+            Log.e(TAG, "Error parsing XML", e);
+            return null;
+        }
+
+        if(contentGuideSource != null && contentGuideSource.size() == 1) { //size can be >1 only at service list level
+            return contentGuideSource.get(0);
+        }
+        else {
+            Log.e(TAG, "Error Parsing content guide source");
+            return null;
         }
     }
 
@@ -403,6 +471,29 @@ public class DvbIService {
 
     public String getLCNNumber() {
         return lcnNumber;
+    }
+
+    public DvbIContentGuide getContentGuide() { return contentGuideSource; }
+
+    public Integer getParentalRating() { return parentalRating; }
+
+    public String getContentGuideServiceRef() { return contentGuideServiceRef; }
+
+    public void _updateContentGuide(List<DvbIContentGuide> guides) {
+        if (guides != null && !guides.isEmpty()) {
+            if (contentGuideSource == null && contentGuideSourceRef != null) {
+                for (DvbIContentGuide guide : guides) {
+                    if (contentGuideSourceRef.equals(guide.getCGSID())) {
+                        contentGuideSource = guide;
+                        break;
+                    }
+                }
+            }
+
+            if (contentGuideSource == null && contentGuideServiceRef != null) {
+                contentGuideSource = guides.get(0);
+            }
+        }
     }
 }
 
