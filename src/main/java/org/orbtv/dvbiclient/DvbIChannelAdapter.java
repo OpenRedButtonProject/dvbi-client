@@ -2,84 +2,106 @@ package org.orbtv.dvbiclient;
 
 import android.media.tv.TvContract;
 
+import org.orbtv.dvbiclient.model.IService;
+import org.orbtv.dvbiclient.model.RelatedMaterial;
+import org.orbtv.dvbiclient.model.Service;
+import org.orbtv.dvbiclient.model.ServiceInstance;
+import org.orbtv.dvbiclient.model.Triplet;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.MissingResourceException;
 
 public class DvbIChannelAdapter {
+    private static String PreferredUILanguage = "";
+    private String mChannelType;
+    private int mIdType;
+    private int mOnid;
+    private String mNid;
+    private int mTsid;
+    private int mSid;
+    private String mName;
+    private String mMajorChannel;
+    private String mDsd;
+    private String mIpBroadcastID;
+    private String mTerminalChannel;
+    private List<String> mAppParallelUri;
+    private List<String> mAppControlUri;
+    private List<String> mAppInactiveUri;
+    private List<String> mOutOfServiceImage;
 
-    private static String preferredUILanguage = "";
-    private String channelType;
-    private int idType;
-    private int onid;
-    private String nid;
-    private int tsid;
-    private int sid;
-    private String name;
-    private String majorChannel;
-    private String dsd;
-    private String ipBroadcastID;
-    private String terminalChannel;
-    private DvbIService parentService;
-    private List<DvbIServiceInstance> serviceInstances = new ArrayList<>();
-    private List<String> appParallelUri;
-    private List<String> appControlUri;
-    private List<String> appInactiveUri;
-    private List<String> outOfServiceImage;
-
-    public static DvbIChannelAdapter createChannel(DvbIService service) {
-        DvbIChannelAdapter channel = new DvbIChannelAdapter();
-        channel.channelType = determineChannelType(service);
-        channel.idType = determineIdType(service);
-        channel.onid = determineOnid(service);
-        channel.nid = null; // Undefined or will be populated later
-        channel.tsid = determineTsid(service);
-        channel.sid = determineSid(service);
-        channel.name = determineChannelName(service.getServiceNames(), preferredUILanguage);
-        channel.majorChannel = determineMajorChannel(service);
-        channel.dsd = null; // Undefined
-        channel.ipBroadcastID = service.getUniqueIdentifier();
-        channel.terminalChannel = determineTerminalChannel(service);
-        channel.serviceInstances = service.getInstances();
-        channel.parentService = null;
-        channel.appParallelUri = determineApps(service, DvbIClient.LINKED_APP_SCHEME_1_1);
-        channel.appControlUri = determineApps(service, DvbIClient.LINKED_APP_SCHEME_1_2);
-        channel.appInactiveUri = determineApps(service, DvbIClient.LINKED_APP_SCHEME_2);
-        channel.outOfServiceImage = determineApps(service, DvbIClient.LINKED_APP_SCHEME_1000_1);
-        return channel;
+    private DvbIChannelAdapter(Service service) {
+        this.mChannelType = determineChannelType(service);
+        this.mIdType = determineIdType(service);
+        this.mOnid = determineOnid(service);
+        this.mNid = null; // Undefined or will be populated later
+        this.mTsid = determineTsid(service);
+        this.mSid = determineSid(service);
+        this.mName = determineChannelName(service.getServiceNames(), PreferredUILanguage);
+        this.mMajorChannel = determineMajorChannel(service);
+        this.mDsd = null; // Undefined
+        this.mIpBroadcastID = service.getUniqueIdentifier();
+        this.mTerminalChannel = determineTerminalChannel(service);
+        this.mAppParallelUri = determineApps(service, null, DvbIClient.LINKED_APP_SCHEME_1_1);
+        this.mAppControlUri = determineApps(service, null, DvbIClient.LINKED_APP_SCHEME_1_2);
+        this.mAppInactiveUri = determineApps(service, null, DvbIClient.LINKED_APP_SCHEME_2);
+        this.mOutOfServiceImage = determineApps(service, null, DvbIClient.LINKED_APP_SCHEME_1000_1);
     }
 
-    public static DvbIChannelAdapter createChannel(DvbIService parentService, DvbIServiceInstance instance) {
-        if (instance == null) {
-            return createChannel(parentService);
-        }
-        DvbIChannelAdapter channel = new DvbIChannelAdapter();
-        channel.channelType = determineChannelType(parentService);
-        channel.idType = determineIdType(instance);
-        channel.onid = determineOnid(instance, parentService);
-        channel.nid = null; // Undefined
-        channel.tsid = determineTsid(instance, parentService);
-        channel.sid = determineSid(instance, parentService);
-        channel.name = determineChannelName(parentService, instance, preferredUILanguage);
-        channel.majorChannel = determineMajorChannel(parentService);
-        channel.dsd = null; // Undefined or will be populated later
-        channel.ipBroadcastID = instance.getDeliveryParameters().get("UriBasedLocation");
-        channel.terminalChannel = determineTerminalChannel(instance);
-        channel.serviceInstances = null;
-        channel.parentService = parentService;
-        channel.appParallelUri = determineApps(instance, parentService, DvbIClient.LINKED_APP_SCHEME_1_1);
-        channel.appControlUri = determineApps(instance, parentService, DvbIClient.LINKED_APP_SCHEME_1_2);
-        channel.appInactiveUri = determineApps(instance, parentService, DvbIClient.LINKED_APP_SCHEME_2);
-        channel.outOfServiceImage = determineApps(instance, parentService, DvbIClient.LINKED_APP_SCHEME_1000_1);
-        return channel;
+    private DvbIChannelAdapter(Service parentService, ServiceInstance instance) {
+        this.mChannelType = determineChannelType(parentService);
+        this.mIdType = determineIdType(instance);
+        this.mOnid = determineOnid(instance, parentService);
+        this.mNid = null; // Undefined
+        this.mTsid = determineTsid(instance, parentService);
+        this.mSid = determineSid(instance, parentService);
+        this.mName = determineChannelName(parentService, instance, PreferredUILanguage);
+        this.mMajorChannel = determineMajorChannel(parentService);
+        this.mDsd = null; // Undefined or will be populated later
+        this.mIpBroadcastID = instance.getDeliveryParameters().get("UriBasedLocation");
+        this.mTerminalChannel = determineTerminalChannel(instance);
+        this.mAppParallelUri = determineApps(instance, parentService, DvbIClient.LINKED_APP_SCHEME_1_1);
+        this.mAppControlUri = determineApps(instance, parentService, DvbIClient.LINKED_APP_SCHEME_1_2);
+        this.mAppInactiveUri = determineApps(instance, parentService, DvbIClient.LINKED_APP_SCHEME_2);
+        this.mOutOfServiceImage = determineApps(instance, parentService, DvbIClient.LINKED_APP_SCHEME_1000_1);
     }
 
-    public static void setPreferredUILanguage(String lang) {
-        preferredUILanguage = lang;
+    // Getter methods for the channel attributes
+    public String getChannelType() { return mChannelType; }
+    public int getIdType() { return mIdType; }
+    public int getOnid() { return mOnid; }
+    public String getNid() { return mNid; }
+    public int getTsid() { return mTsid; }
+    public int getSid() { return mSid; }
+    public String getName() { return mName; }
+    public String getMajorChannel() { return mMajorChannel; }
+    public String getDsd() { return mDsd; }
+    public String getIpBroadcastID() { return mIpBroadcastID; }
+    public String getTerminalChannel() { return mTerminalChannel; }
+    public List<String> getAppParallelUris() { return mAppParallelUri; }
+    public List<String> getAppControlUris() { return mAppControlUri; }
+    public List<String> getAppInactiveUris() { return mAppInactiveUri; }
+    public List<String> getOutOfServiceImages() { return mOutOfServiceImage; }
+
+    @Override
+    public String toString() {
+        String ret = "Channel Type: " + mChannelType
+                + "\nId Type:" + mIdType
+                + "\nONID:" + String.format(Locale.ENGLISH, "%d", mOnid)
+                + "\nNID:" + mNid
+                + "\nTSID:" + String.format(Locale.ENGLISH, "%d", mTsid)
+                + "\nSID:" + String.format(Locale.ENGLISH, "%d", mSid)
+                + "\nName:" + mName
+                + "\nMajor Channel:" + mMajorChannel
+                + "\nDSD:" + mDsd
+                + "\nIP Broadcast ID:" + mIpBroadcastID
+                + "\nTerminal Channel:" + mTerminalChannel;
+        return ret;
     }
 
-    private static List<String> determineApps(DvbIService service, String appType) {
+    private List<String> determineApps(IService service, IService fallbackService, String appType) {
         List<RelatedMaterial> relatedMaterials = service.getRelatedMaterials();
         List<String> uris = new ArrayList<>();
         for (RelatedMaterial relatedMaterial : relatedMaterials) {
@@ -94,34 +116,13 @@ public class DvbIChannelAdapter {
                 }
             }
         }
+        if (uris.isEmpty() && fallbackService != null) {
+            uris = determineApps(fallbackService, null, appType);
+        }
         return uris;
     }
 
-    private static List<String> determineApps(DvbIServiceInstance instance, DvbIService parentService, String appType) {
-        List<RelatedMaterial> relatedMaterials = instance.getRelatedMaterials();
-        List<String> uris = new ArrayList<>();
-        for (RelatedMaterial relatedMaterial : relatedMaterials) {
-            String howRelatedHref = relatedMaterial.getHowRelatedHref();
-            String mediaLocatorContentType = relatedMaterial.getMediaLocatorContentType();
-            if (howRelatedHref != null && mediaLocatorContentType != null &&
-                    ((howRelatedHref.startsWith("urn:dvb:metadata:cs:LinkedApplicationCS") &&
-                    relatedMaterial.isXmlAitContentType() || DvbIClient.LINKED_APP_SCHEME_1000_1.equals(howRelatedHref)) &&
-                    appType.equals(howRelatedHref))) {
-                String xmlUri = relatedMaterial.getMediaLocatorUri();
-                if (xmlUri != null && !xmlUri.isEmpty()) {
-                    uris.add(xmlUri);
-                }
-            }
-        }
-
-        if (uris.isEmpty()) {
-            uris = determineApps(parentService, appType);
-        }
-
-        return uris;
-    }
-
-    private static String determineChannelType(DvbIService service) {
+    private String determineChannelType(Service service) {
         String serviceType = service.getServiceType();
 
         if (serviceType == null || "urn:dvb:metadata:cs:ServiceTypeCS:2019:linear".equals(serviceType)) {
@@ -143,7 +144,7 @@ public class DvbIChannelAdapter {
         //return "TYPE_OTHER";
     }
 
-    private static boolean isHbbtvData(RelatedMaterial relatedMaterial) {
+    private boolean isHbbtvData(RelatedMaterial relatedMaterial) {
         String howRelatedHref = relatedMaterial.getHowRelatedHref();
         String mediaLocatorContentType = relatedMaterial.getMediaLocatorContentType();
 
@@ -152,12 +153,12 @@ public class DvbIChannelAdapter {
                 relatedMaterial.isXmlAitContentType();
     }
 
-    private static int determineIdType(DvbIService service) {
-        List<DvbIServiceInstance> instances = service.getInstances();
+    private int determineIdType(Service service) {
+        List<ServiceInstance> instances = service.getInstances();
         String deliveryType = null;
 
         boolean sameDeliveryType = true;
-        for (DvbIServiceInstance instance : instances) {
+        for (ServiceInstance instance : instances) {
             String instanceDeliveryType = instance.getDeliveryType();
             if (instanceDeliveryType == null || instanceDeliveryType.isEmpty()) {
                 sameDeliveryType = false;
@@ -192,7 +193,7 @@ public class DvbIChannelAdapter {
     }
 
 
-    private static int determineIdType(DvbIServiceInstance instance) {
+    private int determineIdType(ServiceInstance instance) {
         String deliveryType = instance.getDeliveryType();
 
         if (deliveryType != null && !deliveryType.isEmpty()) {
@@ -216,7 +217,7 @@ public class DvbIChannelAdapter {
     }
 
 
-    private static int determineOnid(DvbIService service) {
+    private int determineOnid(Service service) {
         Triplet triplet = service.getTriplet();
         if (triplet != null) {
             return triplet.getOrigNetId();
@@ -224,7 +225,7 @@ public class DvbIChannelAdapter {
         return 0;
     }
 
-    private static int determineOnid(DvbIServiceInstance instance, DvbIService service) {
+    private int determineOnid(ServiceInstance instance, Service service) {
         Triplet triplet = instance.getTriplet();
         Triplet parentTriplet = service.getTriplet();
         if (triplet != null) {
@@ -235,7 +236,7 @@ public class DvbIChannelAdapter {
         return 0;
     }
 
-    private static int determineTsid(DvbIService service) {
+    private int determineTsid(Service service) {
         Triplet triplet = service.getTriplet();
         if (triplet != null) {
             return triplet.getTsId();
@@ -243,7 +244,7 @@ public class DvbIChannelAdapter {
         return 0;
     }
 
-    private static int determineTsid(DvbIServiceInstance instance, DvbIService service) {
+    private int determineTsid(ServiceInstance instance, Service service) {
         Triplet triplet = instance.getTriplet();
         Triplet parentTriplet = service.getTriplet();
         if (triplet != null) {
@@ -254,7 +255,7 @@ public class DvbIChannelAdapter {
         return 0;
     }
 
-    private static int determineSid(DvbIService service) {
+    private int determineSid(Service service) {
         Triplet triplet = service.getTriplet();
         if (triplet != null) {
             return triplet.getServiceId();
@@ -262,7 +263,7 @@ public class DvbIChannelAdapter {
         return 0;
     }
 
-    private static int determineSid(DvbIServiceInstance instance, DvbIService service) {
+    private int determineSid(ServiceInstance instance, Service service) {
         Triplet triplet = instance.getTriplet();
         Triplet parentTriplet = service.getTriplet();
         if (triplet != null) {
@@ -273,25 +274,24 @@ public class DvbIChannelAdapter {
         return 0;
     }
 
-    private static String determineChannelName(Map<String, String> names, String preferredLanguage) {
+    private String determineChannelName(Map<String, String> names, String preferredLanguage) {
         if (names != null && !names.isEmpty()) {
             if (preferredLanguage != null && !preferredLanguage.isEmpty()) {
-                for (Map.Entry<String, String> entry : names.entrySet()) {
-                    if (preferredLanguage.equals(entry.getValue())) {
-                        return entry.getKey();
-                    }
+                String name = names.get(convertThreeToTwoLetterCode(preferredLanguage));
+                if (name != null) {
+                    return name;
                 }
             }
 
             // If the preferred language is not found or empty, select the first available name
-            for (String name : names.keySet()) {
-                return name;
+            for (String value : names.values()) {
+                return value;
             }
         }
         return null;
     }
 
-    private static String determineChannelName(DvbIService parentService, DvbIServiceInstance instance, String preferredLanguage) {
+    private String determineChannelName(Service parentService, ServiceInstance instance, String preferredLanguage) {
         String displayName = determineChannelName(instance.getDisplayNames(), preferredLanguage);
         if (displayName != null && !displayName.isEmpty()) {
             return displayName;
@@ -300,102 +300,52 @@ public class DvbIChannelAdapter {
         return determineChannelName(parentService.getServiceNames(), preferredLanguage);
     }
 
-    private static String determineMajorChannel(DvbIService service) {
+    public String convertThreeToTwoLetterCode(String threeLetterCode) {
+        for (Locale locale : Locale.getAvailableLocales()) {
+            if (threeLetterCode.equals(locale.getISO3Language())) {
+                return locale.getLanguage();
+            }
+        }
+        return null;  // or throw an exception if appropriate
+    }
+
+    private String determineMajorChannel(Service service) {
         return service.getLCNNumber();
     }
 
-    private static String determineTerminalChannel(DvbIService service) {
+    private String determineTerminalChannel(Service service) {
         return null; // Undefined - can be determined later
     }
 
-    private static String determineTerminalChannel(DvbIServiceInstance instance) {
+    private String determineTerminalChannel(ServiceInstance instance) {
         // table O.3 is missing the property completely (error?)
         return null; // Undefined
     }
 
-    // Getter methods for the channel attributes
-    public String getChannelType() {
-        return channelType;
+    public static void setPreferredUILanguage(String lang) {
+        PreferredUILanguage = lang;
     }
 
-    public int getIdType() {
-        return idType;
-    }
+    public static class Builder {
+        private Service mService = null;
+        private ServiceInstance mServiceInstance = null;
 
-    public int getOnid() {
-        return onid;
-    }
-
-    public String getNid() {
-        return nid;
-    }
-
-    public int getTsid() {
-        return tsid;
-    }
-
-    public int getSid() {
-        return sid;
-    }
-
-    public String getName() {
-        return name;
-    }
-
-    public String getMajorChannel() {
-        return majorChannel;
-    }
-
-    public String getDsd() {
-        return dsd;
-    }
-
-    public String getIpBroadcastID() {
-        return ipBroadcastID;
-    }
-
-    public String getTerminalChannel() {
-        return terminalChannel;
-    }
-
-    public List<DvbIServiceInstance> getServiceInstances() {
-        return serviceInstances;
-    }
-
-    public DvbIService getParentService() {
-        return parentService;
-    }
-
-    public List<String> getAppParallelUris() {
-        return appParallelUri;
-    }
-
-    public List<String> getAppControlUris() {
-        return appControlUri;
-    }
-
-    public List<String> getAppInactiveUris() { return appInactiveUri; }
-
-    public List<String> getOutOfServiceImages() { return outOfServiceImage; }
-
-    @Override
-    public String toString() {
-        String ret = "Channel Type: " + channelType
-            + "\nId Type:" + idType
-            + "\nONID:" + String.format(Locale.ENGLISH, "%d", onid)
-            + "\nNID:" + nid
-            + "\nTSID:" + String.format(Locale.ENGLISH, "%d", tsid)
-            + "\nSID:" + String.format(Locale.ENGLISH, "%d", sid)
-            + "\nName:" + name
-            + "\nMajor Channel:" + majorChannel
-            + "\nDSD:" + dsd
-            + "\nIP Broadcast ID:" + ipBroadcastID
-            + "\nTerminal Channel:" + terminalChannel;
-
-        if (serviceInstances != null) {
-            int numInstances = serviceInstances.size();
-            ret += "\nNumber of Instances: " + numInstances;
+        public DvbIChannelAdapter.Builder setService(Service value) {
+            mService = value;
+            return this;
         }
-        return ret;
+        public DvbIChannelAdapter.Builder setServiceInstance(ServiceInstance value) {
+            mServiceInstance = value;
+            return this;
+        }
+        public DvbIChannelAdapter build() {
+            if (mService != null) {
+                if (mServiceInstance != null) {
+                    return new DvbIChannelAdapter(mService, mServiceInstance);
+                }
+                return new DvbIChannelAdapter(mService);
+            }
+            return null;
+        }
     }
 }

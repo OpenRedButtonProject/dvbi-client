@@ -140,6 +140,7 @@ public class DvbIView extends WebView {
                 mContext.getMainExecutor().execute(() -> {
                     if (suspend) {
                         this.setVisibility(View.INVISIBLE);
+                        // TODO: we may need to consider an alternative solution, as this will pause the video
                         this.onPause();
                     } else if (mPageLoaded) {
                         this.onResume();

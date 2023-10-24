@@ -61,7 +61,8 @@
                                 default:
                                     break;
                             }
-                        } else if (track.roles.length === 2) {
+                        }
+                        if (track.roles.length === 2) {
                             if (track.roles.includes('subtitle') && track.roles.includes('main')) {
                                 return 'subtitles';
                             }
@@ -74,6 +75,16 @@
                 }
                 function extractKindFromAudioTrack(track) {
                     if (track.roles) {
+                        if (track.accessibility[0] == "1") {
+                            switch (track.roles[0]) {
+                                case 'alternate':
+                                    return 'descriptions';
+                                case 'commentary':
+                                    return 'descriptions';
+                                default:
+                                    break;
+                            }
+                        }
                         if (track.roles.length === 1) {
                             switch (track.roles[0]) {
                                 case 'alternate':
@@ -85,7 +96,8 @@
                                 default:
                                     break;
                             }
-                        } else if (track.roles.length === 2) {
+                        }
+                        if (track.roles.length === 2) {
                             if (
                                 track.roles.includes('description') &&
                                 track.roles.includes('supplementary')
