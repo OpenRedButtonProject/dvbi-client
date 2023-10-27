@@ -7,16 +7,13 @@ public class RelatedMaterial {
     private String mMediaLocatorUri;
     private String mMediaLocatorContentType;
 
-    private RelatedMaterial() {
-    }
+    private RelatedMaterial() { }
 
     public String getHowRelatedHref() {
         return mHowRelatedHref;
     }
 
-    public String getMediaLocatorUri() {
-        return mMediaLocatorUri;
-    }
+    public String getMediaLocatorUri() { return mMediaLocatorUri; }
 
     public String getMediaLocatorContentType() {
         return mMediaLocatorContentType;

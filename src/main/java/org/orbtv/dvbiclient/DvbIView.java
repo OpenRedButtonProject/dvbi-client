@@ -18,6 +18,7 @@ public class DvbIView extends WebView {
     private static final String TAG = DvbIView.class.getSimpleName();
     private final Context mContext;
     private String mLastUrl = "about:blank";
+    private boolean mSubsEnabled = false;
     private Boolean mPageLoaded = false;
     private Boolean mIsSuspended = false;
 
@@ -63,7 +64,7 @@ public class DvbIView extends WebView {
                 Log.i(TAG, "onPageFinished " + url + "...");
                 if (DVBI_PAGE.equals(url)) {
                     synchronized (mPageLoaded) {
-                        evaluateJavascript("orb_loadMedia('" + mLastUrl + "')", null);
+                        evaluateJavascript("orb_loadMedia('" + mLastUrl + "', " + mSubsEnabled + ")", null);
                         mPageLoaded = true;
                     }
                 }
@@ -87,10 +88,11 @@ public class DvbIView extends WebView {
         mJSCallbacks.remove(handler);
     }
 
-    public boolean tune(String url) {
+    public boolean tune(String url, boolean enableSubs) {
         Log.i(TAG, "Tuning to url " + url + "...");
         if (url != null && url.startsWith("http")) {
             mLastUrl = url;
+            mSubsEnabled = enableSubs;
             mContext.getMainExecutor().execute(() -> {
                 synchronized (mPageLoaded) {
                     if (!DVBI_PAGE.equals(this.getUrl())) {
@@ -100,7 +102,7 @@ public class DvbIView extends WebView {
                             this.setVisibility(View.VISIBLE);
                         }
                     } else if (mPageLoaded) {
-                        evaluateJavascript("orb_loadMedia('" + mLastUrl + "')", null);
+                        evaluateJavascript("orb_loadMedia('" + mLastUrl + "', " + enableSubs + ")", null);
                     }
                 }
             });
@@ -122,7 +124,7 @@ public class DvbIView extends WebView {
 
     public void setVideoRectangle(int x, int y, int width, int height) {
         mContext.getMainExecutor().execute(() -> {
-            evaluateJavascript("setVideoRectangle(" + x + "," + y + ","
+            evaluateJavascript("orb_setVideoRectangle(" + x + "," + y + ","
                     + width + "," + height + ")", null);
         });
     }

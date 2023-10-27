@@ -80,6 +80,8 @@ public class DvbIClient {
     private boolean mBlocked = false; // TODO: should it be part of TunedServiceManager?
     private List<TvTrackInfo> mTracks = new ArrayList<>(); // TODO: should it be part of TunedServiceManager?
     private HashMap<Integer, TvTrackInfo> mSelectedTracks = new HashMap<>(); // TODO: should it be part of TunedServiceManager?
+    private boolean mSubtitlesEnabled = false;
+    private HashMap<Integer, Boolean> mIsUnselected = new HashMap<>();
     private final ITvInputCallback mTvInputCallback;
 
     private final TunedServiceManager mServiceManager = new TunedServiceManager(new TunedServiceManager.Callback() {
@@ -111,17 +113,19 @@ public class DvbIClient {
                     String uri = toInstance.getUri();
                     channel = channelBuilder.setServiceInstance(toInstance).build();
                     Log.i(TAG, "---------- channel info ----------\n" + channel + "\n------------------------------------");
-                    if (channel.getAppControlUris().isEmpty()) {
+                    String app_1_2 = channel.getLinkedAppUri(LINKED_APP_SCHEME_1_2);
+                    if (app_1_2 == null) {
                         if (!mBlocked) {
                             if ("dvb-dash".equals(toInstance.getDeliveryType())) {
                                 mTvInputCallback.tuneOff();
-                                if (mDvbIView.tune(uri)) {
+                                if (mDvbIView.tune(uri, mSubtitlesEnabled)) {
                                     dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
                                 }
                             } else {
                                 mDvbIView.tuneOff();
                                 mTracks.clear();
                                 mSelectedTracks.clear();
+                                mIsUnselected.clear();
                                 mTvInputCallback.tune(toInstance.getTriplet().toString());
                             }
                         }
@@ -129,6 +133,7 @@ public class DvbIClient {
                             mDvbIView.tuneOff();
                             mTracks.clear();
                             mSelectedTracks.clear();
+                            mIsUnselected.clear();
                             dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_BLOCKED);
                             mTvInputCallback.tuneOff();
                         }
@@ -138,8 +143,8 @@ public class DvbIClient {
                         dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
                         dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_PLAYING);
 
-                        Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_1_2 + "' from Related Materials (" + channel.getAppControlUris().get(0) + ")");
-                        new GetXmlAitTask().execute(new XmlAitAttributes(channel.getAppControlUris().get(0), LINKED_APP_SCHEME_1_2));
+                        Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_1_2 + "' from Related Materials (" + app_1_2 + ")");
+                        new GetXmlAitTask().execute(new XmlAitAttributes(app_1_2, LINKED_APP_SCHEME_1_2));
                     }
 
                     int index = service.getInstances().indexOf(toInstance);
@@ -157,14 +162,14 @@ public class DvbIClient {
                             channel.getSid(),
                             PLAYER_STATUS_STARTING
                     );
-                    if (!channel.getAppInactiveUris().isEmpty()) {
-                        Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_2 + "' from Related Materials (" + channel.getAppInactiveUris().get(0) + ")");
-                        new GetXmlAitTask().execute(new XmlAitAttributes(channel.getAppInactiveUris().get(0), LINKED_APP_SCHEME_2));
-                    } else if (!channel.getOutOfServiceImages().isEmpty()) {
-                        Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_1000_1 + "' from Related Materials (" + channel.getOutOfServiceImages().get(0) + ")");
+                    if (channel.getLinkedAppUri(LINKED_APP_SCHEME_2) != null) {
+                        Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_2 + "' from Related Materials (" + channel.getLinkedAppUri(LINKED_APP_SCHEME_2) + ")");
+                        new GetXmlAitTask().execute(new XmlAitAttributes(channel.getLinkedAppUri(LINKED_APP_SCHEME_2), LINKED_APP_SCHEME_2));
+                    } else if (channel.getLinkedAppUri(LINKED_APP_SCHEME_1000_1) != null) {
+                        Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_1000_1 + "' from Related Materials (" + channel.getLinkedAppUri(LINKED_APP_SCHEME_1000_1) + ")");
                         mDvbIView.getContext().getMainExecutor().execute(() -> {
                             mDvbIView.setVisibility(View.VISIBLE);
-                            mDvbIView.loadUrl(channel.getOutOfServiceImages().get(0));
+                            mDvbIView.loadUrl(channel.getLinkedAppUri(LINKED_APP_SCHEME_1000_1));
                         });
                     }
                 }
@@ -200,13 +205,21 @@ public class DvbIClient {
                         int key = it.getKey();
                         for (TvTrackInfo track : mTracks) {
                             String id = track.getId();
-                            if (track.getType() == key && id.split(":")[0].equals(data.getString("id"))) {
-                                TvTrackInfo oldTrack = mSelectedTracks.get(key);
-                                mSelectedTracks.put(key, track);
-                                for (Callback cb : mCallbacks) {
-                                    cb.onTrackChanged(track, oldTrack);
+                            if (track.getType() == key) {
+                                if (data.isNull("id")) {
+                                    // TODO: do we need to remove the track at key?
+                                    for (Callback cb : mCallbacks) {
+                                        cb.onTrackChanged(key, null);
+                                    }
+                                    break;
                                 }
-                                break;
+                                else if (id.split(":")[0].equals(data.getString("id"))) {
+                                    mSelectedTracks.put(key, track);
+                                    for (Callback cb : mCallbacks) {
+                                        cb.onTrackChanged(key, track.getId());
+                                    }
+                                    break;
+                                }
                             }
                         }
                         break;
@@ -253,14 +266,14 @@ public class DvbIClient {
                         .setLanguage(new Locale(language).getISO3Language())
                         .setEncrypted(!track.isNull("contentProtection"))
                         .setEncoding(track.getString("mimeType"));
-                if (trackType == TvTrackInfo.TYPE_AUDIO && "descriptions".equals(track.getString("kind"))) {
-                    builder.setDescription("AD")
-                            .setAudioDescription(true);
+                if (trackType == TvTrackInfo.TYPE_AUDIO) {
+                    if ("descriptions".equals(track.getString("kind"))) {
+                        builder.setDescription("AD")
+                                .setAudioDescription(true);
+                    }
+                    builder.setAudioChannelCount(track.getInt("audioChannelConfiguration"));
                 } else if (trackType == TvTrackInfo.TYPE_VIDEO) {
-                    JSONObject bitrate = track.getJSONArray("bitrateList").getJSONObject(0);
-                    float width = bitrate.getInt("width");
-                    float height = bitrate.getInt("height");
-                    builder.setVideoPixelAspectRatio(width / height);
+                    builder.setVideoPixelAspectRatio((float)track.getDouble("aspectRatio"));
                 }
             }
             catch (JSONException e) {
@@ -287,10 +300,10 @@ public class DvbIClient {
             if (PLAYER_STATUS_PLAYING.equals(eventName)) {
                 DvbIChannelAdapter channel = mServiceManager.getTunedChannel();
                 if (channel != null) {
-                    List<String> appUri = channel.getAppParallelUris();
-                    if (!appUri.isEmpty()) {
+                    String appUri = channel.getLinkedAppUri(LINKED_APP_SCHEME_1_1);
+                    if (appUri != null) {
                         Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_1_1 + "' from Related Materials (" + appUri + ")");
-                        new GetXmlAitTask().execute(new XmlAitAttributes(appUri.get(0), LINKED_APP_SCHEME_1_1));
+                        new GetXmlAitTask().execute(new XmlAitAttributes(appUri, LINKED_APP_SCHEME_1_1));
                     }
                 }
             }
@@ -405,17 +418,45 @@ public class DvbIClient {
 
     public synchronized TvTrackInfo getSelectedTrack(int type) { return mSelectedTracks.get(type); }
 
-    public synchronized boolean selectTrack(int type, String id) {
-        boolean result = false;
-        for (TvTrackInfo track : mTracks) {
-            if (track.getId().equals(id) && type == track.getType()) {
-                String[] tmp = id.split(":");
-                mDvbIView.selectTrack(TRACK_TYPE_LOOKUP.get(type), tmp[0]);
-                result = true;
-                break;
+    public void setSubtitlesEnabled(boolean enable) {
+        if (enable != mSubtitlesEnabled) {
+            mSubtitlesEnabled = enable;
+            TvTrackInfo subsTrack = mSelectedTracks.get(TvTrackInfo.TYPE_SUBTITLE);
+            if (subsTrack != null) {
+                mDvbIView.selectTrack(
+                        TRACK_TYPE_LOOKUP.get(TvTrackInfo.TYPE_SUBTITLE),
+                        enable ? subsTrack.getId().split(":")[0] : "undefined"
+                );
             }
         }
-        return result;
+    }
+
+    public boolean getSubtitlesEnabled() { return mSubtitlesEnabled; }
+
+    public synchronized boolean selectTrack(int type, String id) {
+        if (mSubtitlesEnabled) {
+            // mandatory condition as OrbProvider sends an id of "0" when a track was previously unselected
+            if ("0".equals(id) && Boolean.TRUE.equals(mIsUnselected.getOrDefault(type, false)) && mSelectedTracks.get(type) != null) {
+                Log.i(TAG, "Restoring previously selected track of type: " + type);
+                mIsUnselected.remove(type);
+                mDvbIView.selectTrack(TRACK_TYPE_LOOKUP.get(type), mSelectedTracks.get(type).getId().split(":")[0]);
+                return true;
+            }
+            for (TvTrackInfo track : mTracks) {
+                if (type == track.getType()) {
+                    if (id == null || id.isEmpty()) {
+                        mDvbIView.selectTrack(TRACK_TYPE_LOOKUP.get(type), "undefined");
+                        mIsUnselected.put(type, true);
+                        return true;
+                    } else if (track.getId().equals(id)) {
+                        mIsUnselected.remove(type);
+                        mDvbIView.selectTrack(TRACK_TYPE_LOOKUP.get(type), id.split(":")[0]);
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     public View getView() {
@@ -426,6 +467,7 @@ public class DvbIClient {
         if (mServiceManager.tune(mDbHandler.getServiceForUID(uid), instanceIndex)) {
             mTracks.clear();
             mSelectedTracks.clear();
+            mIsUnselected.clear();
             mBlocked = false;
             return true;
         }
@@ -437,6 +479,7 @@ public class DvbIClient {
         mServiceManager.tuneOff();
         mTracks.clear();
         mSelectedTracks.clear();
+        mIsUnselected.clear();
         mDvbIView.tuneOff();
     }
 
@@ -756,6 +799,6 @@ public class DvbIClient {
         protected void onProcessXmlAit(String xmlAit, String scheme) { }
         protected void onDashStreamEvent(int listenId, String name, String status) { }
         protected void onTracksUpdated() { }
-        protected void onTrackChanged(TvTrackInfo newTrack, TvTrackInfo oldTrack) { }
+        protected void onTrackChanged(int type, String id) { }
     }
 }

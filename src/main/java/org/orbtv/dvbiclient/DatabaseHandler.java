@@ -383,7 +383,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
 
         updateContentGuide(db, service.getContentGuide());
         updateRelatedMaterials(db, FOREIGN_KEY_PREFIX_SERVICE + uid, service.getRelatedMaterials());
-        updateServiceNames(db, uid, service.getServiceNames());
+        updateServiceNames(db, uid, service.getDisplayNames());
 
         List<ServiceInstance> instances = service.getInstances();
         for (int i = 0; i < instances.size(); ++i) {
@@ -551,7 +551,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                     Map<String, String> deliveryParams = null;
                     try {
                         deliveryParams = parseDeliveryParameters(new JSONObject(new String(cursor.getBlob(0))));
-                        triplet = Triplet.parseFromURI(deliveryParams.getOrDefault("DVBTriplet", null));
+                        triplet = Triplet.parseFromURI(deliveryParams.get("DVBTriplet"));
                     } catch (Exception e) { }
                     instances.add(instanceBuilder
                                     .setDisplayNames(getServiceNamesForUID(db, uid + "_" + instances.size()))

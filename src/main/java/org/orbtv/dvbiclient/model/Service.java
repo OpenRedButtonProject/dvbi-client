@@ -45,7 +45,7 @@ public class Service implements IService {
 
     public String getUniqueIdentifier() { return mUniqueIdentifier; }
     
-    public Map<String, String> getServiceNames() { return mServiceNames; }
+    public Map<String, String> getDisplayNames() { return mServiceNames; }
 
     public String getProviderName() { return mProviderName; }
  

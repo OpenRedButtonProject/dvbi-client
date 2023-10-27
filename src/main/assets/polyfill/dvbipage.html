@@ -1,173 +1,243 @@
 <html>
 <head>
     <style>
-      #orb_subsPH { position: static; overflow: auto; pointer-events:none; }
+        #orb_subsPH { position: static; overflow: auto; pointer-events:none; }
+        #orb_video { width: 100%; height: 100%; position: absolute; }
     </style>
     <script type="text/javascript" src="dash.all.min.js"></script>
     <script>
-        let player;
-        let video;
-        let lastSource;
-        function initialize() {
-            video = document.getElementById("orb_video");
-            player = orb_dashjs.MediaPlayer().create();
-            player.initialize(video, undefined, true);
-            player.attachTTMLRenderingDiv(document.getElementById('orb_subsPH'));
+        let _player;
+        let _video;
+        let _lastSource;
+        let _subs;
 
-            player.on(orb_dashjs.MediaPlayer.events.PLAYBACK_PLAYING, function(e) {
+        function _setTrackEnabled(type, enable) {
+            let result = false;
+            console.log("Setting track of type", type, "to enabled=" + enable);
+            switch (type) {
+                case "video":
+                    result = enable === (_video.style.display === "none");
+                    if (result) {
+                        _video.style.display = enable ? "block" : "none";
+                    }
+                    break;
+                case "audio":
+                    result = enable === _video.muted;
+                    if (result) {
+                        _video.muted = !enable;
+                    }
+                    break;
+                case "text":
+                    result = enable === !_subs.parentNode;
+                    if (result) {
+                        if (enable) {
+                            document.body.appendChild(_subs);
+                        }
+                        else {
+                            _subs.parentNode.removeChild(_subs);
+                        }
+                    }
+                    break;
+                default:
+                    break;
+            }
+            return result;
+        }
+
+        function _getTrackDataFromMediaInfo(mediaInfo, isSelected) {
+            let result = {
+                type: mediaInfo.type,
+                selected: isSelected,
+                lang: mediaInfo.lang,
+                id: mediaInfo.id,
+                contentProtection: mediaInfo.contentProtection,
+                mimeType: mediaInfo.mimeType
+            };
+            function extractKindFromVideoTrack() {
+                if (mediaInfo.roles) {
+                    if (mediaInfo.roles.length === 1) {
+                        switch (mediaInfo.roles[0]) {
+                            case 'alternate':
+                                return 'alternative';
+                            case 'main':
+                                return 'main';
+                            case 'commentary':
+                                return 'commentary';
+                            default:
+                                break;
+                        }
+                    }
+                    if (mediaInfo.roles.length === 2) {
+                        if (mediaInfo.roles.includes('subtitle') && mediaInfo.roles.includes('main')) {
+                            return 'subtitles';
+                        }
+                        if (mediaInfo.roles.includes('caption') && mediaInfo.roles.includes('main')) {
+                            return 'captions';
+                        }
+                    }
+                }
+                return '';
+            }
+            function extractKindFromAudioTrack() {
+                if (mediaInfo.roles) {
+                    if (mediaInfo.accessibility[0] == "1") {
+                        switch (mediaInfo.roles[0]) {
+                            case 'alternate':
+                                return 'descriptions';
+                            case 'commentary':
+                                return 'descriptions';
+                            default:
+                                break;
+                        }
+                    }
+                    if (mediaInfo.roles.length === 1) {
+                        switch (mediaInfo.roles[0]) {
+                            case 'alternate':
+                                return 'alternative';
+                            case 'main':
+                                return 'main';
+                            case 'commentary':
+                                return 'commentary';
+                            default:
+                                break;
+                        }
+                    }
+                    if (mediaInfo.roles.length === 2) {
+                        if (
+                            mediaInfo.roles.includes('description') &&
+                            mediaInfo.roles.includes('supplementary')
+                        ) {
+                            return 'descriptions';
+                        }
+                        if (mediaInfo.roles.includes('description') && mediaInfo.roles.includes('main')) {
+                            return 'main-desc';
+                        }
+                        if (mediaInfo.roles.includes('dub') && mediaInfo.roles.includes('main')) {
+                            return 'translation';
+                        }
+                    }
+                }
+                return '';
+            }
+            switch (mediaInfo.type) {
+                case "video":
+                    result.kind = extractKindFromVideoTrack();
+                    if (mediaInfo.bitrateList[0]) {
+                        result.aspectRatio = mediaInfo.bitrateList[0].width / mediaInfo.bitrateList[0].height;
+                    }
+                    break;
+                case "audio":
+                    result.kind = extractKindFromAudioTrack();
+                    result.audioChannelConfiguration = mediaInfo.audioChannelConfiguration[0];
+                    break;
+                case "text":
+                    break;
+                default:
+                    return undefined;
+            }
+            return result;
+        }
+        function _initialize() {
+            _subs = document.getElementById("orb_subsPH");
+            _video = document.getElementById("orb_video");
+            _player = orb_dashjs.MediaPlayer().create();
+            _player.initialize(_video, undefined, true);
+            _player.attachTTMLRenderingDiv(_subs);
+
+            _player.on(orb_dashjs.MediaPlayer.events.PLAYBACK_PLAYING, function(e) {
                 Android.onVideoEvent('DVBI_PLAYBACK_PLAYING', JSON.stringify(e));
             });
 
-            player.on(orb_dashjs.MediaPlayer.events.PLAYBACK_ERROR, function(e) {
+            _player.on(orb_dashjs.MediaPlayer.events.PLAYBACK_ERROR, function(e) {
                 Android.onVideoEvent('DVBI_PLAYBACK_ERROR', JSON.stringify(e));
             });
 
-            player.on(orb_dashjs.MediaPlayer.events.PLAYBACK_STALLED, function(e) {
+            _player.on(orb_dashjs.MediaPlayer.events.PLAYBACK_STALLED, function(e) {
                 Android.onVideoEvent('DVBI_PLAYBACK_STALLED', JSON.stringify(e));
             });
 
-            player.on('urn:dvb:dash:appsignalling:2016', function (payload) {
+            _player.on('urn:dvb:dash:appsignalling:2016', function (payload) {
                 //payload.event.messageData = payload.event.messageData.replace(/hbbtv1.test\/_TESTSUITE\/TESTS/g, "192.168.1.179/hbbtv_tests");
                 //payload.event.messageData = payload.event.messageData.replace(/.html5/g, ".html");
                 console.log(payload);
                 Android.onVideoEvent(payload.type, JSON.stringify(payload.event));
             });
 
-            player.on('urn:dvb:iptv:cpm:2014', function (e) {
+            _player.on('urn:dvb:iptv:cpm:2014', function (e) {
                 e.event.messageData = e.event.messageData.replace("<BroadcastEvent>", "<BroadcastEvent xmlns:mpeg7='" + e.type + "'>");
                 console.log(e);
                 Android.onVideoEvent(e.type, JSON.stringify(e.event));
             });
 
-            player.on('currentTrackChanged', (e) => {
-                e.newMediaInfo.selected = true;
-                if (e.oldMediaInfo) {
-                    e.oldMediaInfo.selected = false;
-                }
-                Android.onVideoEvent('DVBI_TRACK_CHANGED', JSON.stringify(e.newMediaInfo));
+            _player.on('currentTrackChanged', (e) => {
+                Android.onVideoEvent('DVBI_TRACK_CHANGED', JSON.stringify(_getTrackDataFromMediaInfo(e.newMediaInfo), true));
             });
 
             function updateTracks() {
-                function extractKindFromVideoTrack(track) {
-                    if (track.roles) {
-                        if (track.roles.length === 1) {
-                            switch (track.roles[0]) {
-                                case 'alternate':
-                                    return 'alternative';
-                                case 'main':
-                                    return 'main';
-                                case 'commentary':
-                                    return 'commentary';
-                                default:
-                                    break;
-                            }
-                        }
-                        if (track.roles.length === 2) {
-                            if (track.roles.includes('subtitle') && track.roles.includes('main')) {
-                                return 'subtitles';
-                            }
-                            if (track.roles.includes('caption') && track.roles.includes('main')) {
-                                return 'captions';
-                            }
-                        }
-                    }
-                    return '';
-                }
-                function extractKindFromAudioTrack(track) {
-                    if (track.roles) {
-                        if (track.accessibility[0] == "1") {
-                            switch (track.roles[0]) {
-                                case 'alternate':
-                                    return 'descriptions';
-                                case 'commentary':
-                                    return 'descriptions';
-                                default:
-                                    break;
-                            }
-                        }
-                        if (track.roles.length === 1) {
-                            switch (track.roles[0]) {
-                                case 'alternate':
-                                    return 'alternative';
-                                case 'main':
-                                    return 'main';
-                                case 'commentary':
-                                    return 'commentary';
-                                default:
-                                    break;
-                            }
-                        }
-                        if (track.roles.length === 2) {
-                            if (
-                                track.roles.includes('description') &&
-                                track.roles.includes('supplementary')
-                            ) {
-                                return 'descriptions';
-                            }
-                            if (track.roles.includes('description') && track.roles.includes('main')) {
-                                return 'main-desc';
-                            }
-                            if (track.roles.includes('dub') && track.roles.includes('main')) {
-                                return 'translation';
-                            }
-                        }
-                    }
-                    return '';
-                }
-                const curAudio = player.getCurrentTrackFor('audio');
-                const curVideo = player.getCurrentTrackFor('video');
-                const curText = player.getCurrentTrackFor('text');
+                const curAudio = _player.getCurrentTrackFor('audio');
+                const curVideo = _player.getCurrentTrackFor('video');
+                const curText = _player.getCurrentTrackFor('text');
                 var tracks = {
-                    audio: player.getTracksFor('audio').map(track => {
-                        track.kind = extractKindFromAudioTrack(track);
-                        track.selected = track === curAudio;
-                        return track;
-                    }),
-                    video: player.getTracksFor('video').map(track => {
-                        track.kind = extractKindFromVideoTrack(track);
-                        track.selected = track === curVideo;
-                        return track;
-                    }),
-                    text: player.getTracksFor('text').map(track => {
-                        track.selected = track === curText;
-                        return track;
-                    })
+                    audio: _player.getTracksFor('audio').map(track => {
+                        return _getTrackDataFromMediaInfo(track, track === curAudio);
+                    }).filter(track => track !== undefined),
+                    video: _player.getTracksFor('video').map(track => {
+                        return _getTrackDataFromMediaInfo(track, track === curVideo);
+                    }).filter(track => track !== undefined),
+                    text: _player.getTracksFor('text').map(track => {
+                        return _getTrackDataFromMediaInfo(track, track === curText);
+                    }).filter(track => track !== undefined)
                 };
                 console.log(tracks);
                 Android.onVideoEvent('DVBI_TRACKS_UPDATED', JSON.stringify(tracks));
             }
-            player.on('tracksChanged', updateTracks);
-            player.on('streamInitialized', updateTracks);
+            _player.on('tracksChanged', updateTracks);
+            _player.on('streamInitialized', updateTracks);
         }
-        function orb_loadMedia(url) {
-            if (lastSource !== url) {
-                lastSource = url;
-                player.attachSource(url);
+        function orb_loadMedia(url, enableSubs) {
+            if (_lastSource !== url) {
+                _lastSource = url;
+                _player.attachSource(url);
             }
             else {
-                if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+                if (_video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
                     Android.onVideoEvent('DVBI_PLAYBACK_PLAYING', JSON.stringify({}));
                 }
             }
+            _setTrackEnabled("video", true);
+            _setTrackEnabled("audio", true);
+            _setTrackEnabled("text", enableSubs);
         }
+
         function orb_selectTrack(type, id) {
-            var track = player
-                .getTracksFor(type)
-                .find((track) => track.id === id);
-            if (track) {
-                player.setCurrentTrack(track);
+            if (id !== undefined) {
+                var track = _player
+                    .getTracksFor(type)
+                    .find((track) => track.id === id);
+                if (track) {
+                    if (track !== _player.getCurrentTrackFor(type)) {
+                        console.log("Selecting track ", track);
+                        _player.setCurrentTrack(track);
+                    }
+                    else if (_setTrackEnabled(type, true)) {
+                        Android.onVideoEvent('DVBI_TRACK_CHANGED', JSON.stringify(_getTrackDataFromMediaInfo(track, true)));
+                    }
+                }
+            }
+            else if (_setTrackEnabled(type, false)) {
+                Android.onVideoEvent('DVBI_TRACK_CHANGED', JSON.stringify({type:type}));
             }
         }
-        function setVideoRectangle(x, y, width, height) {
-            video.style.left = x + 'px';
-            video.style.top = y + 'px';
-            video.style.width = width + 'px';
-            video.style.height = height + 'px';
+        function orb_setVideoRectangle(x, y, width, height) {
+            _video.style.left = x + 'px';
+            _video.style.top = y + 'px';
+            _video.style.width = width + 'px';
+            _video.style.height = height + 'px';
         }
     </script>
 </head>
-<body onload="initialize()" style='margin:0;background-color:#000;'>
-    <video id='orb_video' style="width:100%;height:100%;position:absolute;"></video>
+<body onload="_initialize()" style='margin:0;background-color:#000;'>
+    <video id='orb_video' style="display:block;"></video>
     <div id='orb_subsPH'></div>
 </body>
 </html>

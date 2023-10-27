@@ -8,11 +8,10 @@ import org.orbtv.dvbiclient.model.Service;
 import org.orbtv.dvbiclient.model.ServiceInstance;
 import org.orbtv.dvbiclient.model.Triplet;
 
-import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.MissingResourceException;
 
 public class DvbIChannelAdapter {
     private static String PreferredUILanguage = "";
@@ -27,27 +26,21 @@ public class DvbIChannelAdapter {
     private String mDsd;
     private String mIpBroadcastID;
     private String mTerminalChannel;
-    private List<String> mAppParallelUri;
-    private List<String> mAppControlUri;
-    private List<String> mAppInactiveUri;
-    private List<String> mOutOfServiceImage;
+    private HashMap<String, String> mLinkedAppUris = new HashMap<>();
 
     private DvbIChannelAdapter(Service service) {
         this.mChannelType = determineChannelType(service);
         this.mIdType = determineIdType(service);
-        this.mOnid = determineOnid(service);
+        this.mOnid = determineOnid(service, null);
         this.mNid = null; // Undefined or will be populated later
-        this.mTsid = determineTsid(service);
-        this.mSid = determineSid(service);
-        this.mName = determineChannelName(service.getServiceNames(), PreferredUILanguage);
+        this.mTsid = determineTsid(service, null);
+        this.mSid = determineSid(service, null);
+        this.mName = determineChannelName(service, null);
         this.mMajorChannel = determineMajorChannel(service);
         this.mDsd = null; // Undefined
         this.mIpBroadcastID = service.getUniqueIdentifier();
         this.mTerminalChannel = determineTerminalChannel(service);
-        this.mAppParallelUri = determineApps(service, null, DvbIClient.LINKED_APP_SCHEME_1_1);
-        this.mAppControlUri = determineApps(service, null, DvbIClient.LINKED_APP_SCHEME_1_2);
-        this.mAppInactiveUri = determineApps(service, null, DvbIClient.LINKED_APP_SCHEME_2);
-        this.mOutOfServiceImage = determineApps(service, null, DvbIClient.LINKED_APP_SCHEME_1000_1);
+        determineApps(service, null);
     }
 
     private DvbIChannelAdapter(Service parentService, ServiceInstance instance) {
@@ -57,15 +50,12 @@ public class DvbIChannelAdapter {
         this.mNid = null; // Undefined
         this.mTsid = determineTsid(instance, parentService);
         this.mSid = determineSid(instance, parentService);
-        this.mName = determineChannelName(parentService, instance, PreferredUILanguage);
+        this.mName = determineChannelName(instance, parentService);
         this.mMajorChannel = determineMajorChannel(parentService);
         this.mDsd = null; // Undefined or will be populated later
         this.mIpBroadcastID = instance.getDeliveryParameters().get("UriBasedLocation");
         this.mTerminalChannel = determineTerminalChannel(instance);
-        this.mAppParallelUri = determineApps(instance, parentService, DvbIClient.LINKED_APP_SCHEME_1_1);
-        this.mAppControlUri = determineApps(instance, parentService, DvbIClient.LINKED_APP_SCHEME_1_2);
-        this.mAppInactiveUri = determineApps(instance, parentService, DvbIClient.LINKED_APP_SCHEME_2);
-        this.mOutOfServiceImage = determineApps(instance, parentService, DvbIClient.LINKED_APP_SCHEME_1000_1);
+        determineApps(instance, parentService);
     }
 
     // Getter methods for the channel attributes
@@ -80,10 +70,7 @@ public class DvbIChannelAdapter {
     public String getDsd() { return mDsd; }
     public String getIpBroadcastID() { return mIpBroadcastID; }
     public String getTerminalChannel() { return mTerminalChannel; }
-    public List<String> getAppParallelUris() { return mAppParallelUri; }
-    public List<String> getAppControlUris() { return mAppControlUri; }
-    public List<String> getAppInactiveUris() { return mAppInactiveUri; }
-    public List<String> getOutOfServiceImages() { return mOutOfServiceImage; }
+    public String getLinkedAppUri(String scheme) { return mLinkedAppUris.get(scheme); }
 
     @Override
     public String toString() {
@@ -101,25 +88,22 @@ public class DvbIChannelAdapter {
         return ret;
     }
 
-    private List<String> determineApps(IService service, IService fallbackService, String appType) {
+    private void determineApps(IService service, IService fallback) {
         List<RelatedMaterial> relatedMaterials = service.getRelatedMaterials();
-        List<String> uris = new ArrayList<>();
         for (RelatedMaterial relatedMaterial : relatedMaterials) {
             String howRelatedHref = relatedMaterial.getHowRelatedHref();
             String mediaLocatorContentType = relatedMaterial.getMediaLocatorContentType();
-            if (howRelatedHref != null && mediaLocatorContentType != null &&
-                    (relatedMaterial.isXmlAitContentType() || DvbIClient.LINKED_APP_SCHEME_1000_1.equals(howRelatedHref)) &&
-                    appType.equals(howRelatedHref)) {
+            if (howRelatedHref != null && !mLinkedAppUris.containsKey(howRelatedHref) && mediaLocatorContentType != null &&
+                    (relatedMaterial.isXmlAitContentType() || DvbIClient.LINKED_APP_SCHEME_1000_1.equals(howRelatedHref))) {
                 String xmlUri = relatedMaterial.getMediaLocatorUri();
                 if (xmlUri != null && !xmlUri.isEmpty()) {
-                    uris.add(xmlUri);
+                    mLinkedAppUris.put(howRelatedHref, xmlUri);
                 }
             }
         }
-        if (uris.isEmpty() && fallbackService != null) {
-            uris = determineApps(fallbackService, null, appType);
+        if (fallback != null) {
+            determineApps(fallback, null);
         }
-        return uris;
     }
 
     private String determineChannelType(Service service) {
@@ -216,68 +200,41 @@ public class DvbIChannelAdapter {
         return -1;
     }
 
-
-    private int determineOnid(Service service) {
+    private int determineOnid(IService service, IService fallback) {
         Triplet triplet = service.getTriplet();
         if (triplet != null) {
             return triplet.getOrigNetId();
+        } else if(fallback != null) {
+            return determineOnid(fallback, null);
         }
         return 0;
     }
 
-    private int determineOnid(ServiceInstance instance, Service service) {
-        Triplet triplet = instance.getTriplet();
-        Triplet parentTriplet = service.getTriplet();
-        if (triplet != null) {
-            return triplet.getOrigNetId();
-        } else if(parentTriplet != null) {
-            return parentTriplet.getOrigNetId();
-        }
-        return 0;
-    }
-
-    private int determineTsid(Service service) {
+    private int determineTsid(IService service, IService fallback) {
         Triplet triplet = service.getTriplet();
         if (triplet != null) {
             return triplet.getTsId();
+        } else if(fallback != null) {
+            return determineTsid(fallback, null);
         }
         return 0;
     }
 
-    private int determineTsid(ServiceInstance instance, Service service) {
-        Triplet triplet = instance.getTriplet();
-        Triplet parentTriplet = service.getTriplet();
-        if (triplet != null) {
-            return triplet.getTsId();
-        } else if(parentTriplet != null) {
-            return parentTriplet.getTsId();
-        }
-        return 0;
-    }
-
-    private int determineSid(Service service) {
+    private int determineSid(IService service, IService fallback) {
         Triplet triplet = service.getTriplet();
         if (triplet != null) {
             return triplet.getServiceId();
+        } else if(fallback != null) {
+            return determineSid(fallback, null);
         }
         return 0;
     }
 
-    private int determineSid(ServiceInstance instance, Service service) {
-        Triplet triplet = instance.getTriplet();
-        Triplet parentTriplet = service.getTriplet();
-        if (triplet != null) {
-            return triplet.getServiceId();
-        } else if(parentTriplet != null) {
-            return parentTriplet.getServiceId();
-        }
-        return 0;
-    }
-
-    private String determineChannelName(Map<String, String> names, String preferredLanguage) {
+    private String determineChannelName(IService service, IService fallback) {
+        Map<String, String> names = service.getDisplayNames();
         if (names != null && !names.isEmpty()) {
-            if (preferredLanguage != null && !preferredLanguage.isEmpty()) {
-                String name = names.get(convertThreeToTwoLetterCode(preferredLanguage));
+            if (PreferredUILanguage != null && !PreferredUILanguage.isEmpty()) {
+                String name = names.get(convertThreeToTwoLetterCode(PreferredUILanguage));
                 if (name != null) {
                     return name;
                 }
@@ -288,16 +245,10 @@ public class DvbIChannelAdapter {
                 return value;
             }
         }
-        return null;
-    }
-
-    private String determineChannelName(Service parentService, ServiceInstance instance, String preferredLanguage) {
-        String displayName = determineChannelName(instance.getDisplayNames(), preferredLanguage);
-        if (displayName != null && !displayName.isEmpty()) {
-            return displayName;
+        if (fallback != null) {
+            return determineChannelName(fallback, null);
         }
-
-        return determineChannelName(parentService.getServiceNames(), preferredLanguage);
+        return null;
     }
 
     public String convertThreeToTwoLetterCode(String threeLetterCode) {
@@ -313,13 +264,8 @@ public class DvbIChannelAdapter {
         return service.getLCNNumber();
     }
 
-    private String determineTerminalChannel(Service service) {
+    private String determineTerminalChannel(IService service) {
         return null; // Undefined - can be determined later
-    }
-
-    private String determineTerminalChannel(ServiceInstance instance) {
-        // table O.3 is missing the property completely (error?)
-        return null; // Undefined
     }
 
     public static void setPreferredUILanguage(String lang) {
