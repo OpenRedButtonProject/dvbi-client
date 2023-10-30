@@ -21,6 +21,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.security.KeyPair;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -233,6 +234,7 @@ public class DvbIClient {
         private synchronized void handleTracksUpdate(JSONObject data) {
             ArrayList<TvTrackInfo> tracks = new ArrayList<>();
             HashMap<Integer, TvTrackInfo> selectedTracks = new HashMap<>();
+            HashMap<Integer, String> changedTracks = new HashMap<>();
             try {
                 for (int key : TRACK_TYPE_LOOKUP.keySet()) {
                     JSONArray tracksPh = data.getJSONArray(TRACK_TYPE_LOOKUP.get(key));
@@ -250,10 +252,26 @@ public class DvbIClient {
             } catch (JSONException e) {
                 e.printStackTrace();
             }
+            for (int key : TRACK_TYPE_LOOKUP.keySet()) {
+                if (key != TvTrackInfo.TYPE_SUBTITLE || mSubtitlesEnabled) {
+                    if (mSelectedTracks.containsKey(key)) {
+                        if (!selectedTracks.containsKey(key)) {
+                            changedTracks.put(key, null);
+                        } else if (!mSelectedTracks.get(key).getId().equals(selectedTracks.get(key).getId())) {
+                            changedTracks.put(key, selectedTracks.get(key).getId());
+                        }
+                    } else if (selectedTracks.containsKey(key)) {
+                        changedTracks.put(key, selectedTracks.get(key).getId());
+                    }
+                }
+            }
             mTracks = tracks;
             mSelectedTracks = selectedTracks;
             for (Callback cb : mCallbacks) {
                 cb.onTracksUpdated();
+                for (Map.Entry<Integer, String> entry : changedTracks.entrySet()) {
+                    cb.onTrackChanged(entry.getKey(), entry.getValue());
+                }
             }
         }
 
@@ -434,25 +452,26 @@ public class DvbIClient {
     public boolean getSubtitlesEnabled() { return mSubtitlesEnabled; }
 
     public synchronized boolean selectTrack(int type, String id) {
-        if (mSubtitlesEnabled) {
-            // mandatory condition as OrbProvider sends an id of "0" when a track was previously unselected
-            if ("0".equals(id) && Boolean.TRUE.equals(mIsUnselected.getOrDefault(type, false)) && mSelectedTracks.get(type) != null) {
-                Log.i(TAG, "Restoring previously selected track of type: " + type);
-                mIsUnselected.remove(type);
-                mDvbIView.selectTrack(TRACK_TYPE_LOOKUP.get(type), mSelectedTracks.get(type).getId().split(":")[0]);
-                return true;
-            }
-            for (TvTrackInfo track : mTracks) {
-                if (type == track.getType()) {
-                    if (id == null || id.isEmpty()) {
-                        mDvbIView.selectTrack(TRACK_TYPE_LOOKUP.get(type), "undefined");
-                        mIsUnselected.put(type, true);
-                        return true;
-                    } else if (track.getId().equals(id)) {
-                        mIsUnselected.remove(type);
-                        mDvbIView.selectTrack(TRACK_TYPE_LOOKUP.get(type), id.split(":")[0]);
-                        return true;
+        // mandatory condition as OrbProvider sends an id of "0" when a track was previously unselected
+        if ("0".equals(id) && Boolean.TRUE.equals(mIsUnselected.getOrDefault(type, false)) && mSelectedTracks.get(type) != null) {
+            Log.i(TAG, "Restoring previously selected track of type: " + type);
+            mIsUnselected.remove(type);
+            mDvbIView.selectTrack(TRACK_TYPE_LOOKUP.get(type), mSelectedTracks.get(type).getId().split(":")[0]);
+            return true;
+        }
+        for (TvTrackInfo track : mTracks) {
+            if (type == track.getType()) {
+                if (id == null || id.isEmpty()) {
+                    mDvbIView.selectTrack(TRACK_TYPE_LOOKUP.get(type), "undefined");
+                    mIsUnselected.put(type, true);
+                    return true;
+                } else if (track.getId().equals(id)) {
+                    if (type == TvTrackInfo.TYPE_SUBTITLE) {
+                        mSubtitlesEnabled = true;
                     }
+                    mIsUnselected.remove(type);
+                    mDvbIView.selectTrack(TRACK_TYPE_LOOKUP.get(type), id.split(":")[0]);
+                    return true;
                 }
             }
         }

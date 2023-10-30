@@ -173,7 +173,7 @@
                 Android.onVideoEvent('DVBI_TRACK_CHANGED', JSON.stringify(_getTrackDataFromMediaInfo(e.newMediaInfo), true));
             });
 
-            function updateTracks() {
+            function updateTracks(e) {
                 const curAudio = _player.getCurrentTrackFor('audio');
                 const curVideo = _player.getCurrentTrackFor('video');
                 const curText = _player.getCurrentTrackFor('text');
@@ -191,8 +191,7 @@
                 console.log(tracks);
                 Android.onVideoEvent('DVBI_TRACKS_UPDATED', JSON.stringify(tracks));
             }
-            _player.on('tracksChanged', updateTracks);
-            _player.on('streamInitialized', updateTracks);
+            _player.on('periodSwitchCompleted', updateTracks);
         }
         function orb_loadMedia(url, enableSubs) {
             if (_lastSource !== url) {
@@ -216,7 +215,7 @@
                     .find((track) => track.id === id);
                 if (track) {
                     if (track !== _player.getCurrentTrackFor(type)) {
-                        console.log("Selecting track ", track);
+                        console.log("Selecting track of type", type, "and lang", track.lang);
                         _player.setCurrentTrack(track);
                     }
                     else if (_setTrackEnabled(type, true)) {
