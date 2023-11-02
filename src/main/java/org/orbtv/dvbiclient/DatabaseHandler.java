@@ -20,7 +20,7 @@ import java.util.Map;
 
 public class DatabaseHandler extends SQLiteOpenHelper {
     private static final String TAG = DatabaseHandler.class.getSimpleName();
-    private static final int DB_VERSION = 20;
+    private static final int DB_VERSION = 22;
     private static final String DB_NAME = "dvbi_db";
     private static final String FOREIGN_KEY_PREFIX_SERVICE = "service_";
     private static final String FOREIGN_KEY_PREFIX_INSTANCE = "instance_";
@@ -63,8 +63,15 @@ public class DatabaseHandler extends SQLiteOpenHelper {
     private static final String AVAILABILITY_PERIOD_TABLE = "availability_periods";
     private static final String AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY = "foreign_key";
     private static final String AVAILABILITY_PERIOD_COLUMN_INDEX = "array_index";
-    private static final String AVAILABILITY_PERIOD_COLUMN_START_TIME = "start_time";
-    private static final String AVAILABILITY_PERIOD_COLUMN_END_TIME = "end_time";
+    private static final String AVAILABILITY_PERIOD_COLUMN_VALID_FROM = "valid_from";
+    private static final String AVAILABILITY_PERIOD_COLUMN_VALID_TO = "valid_to";
+
+    private static final String AVAILABILITY_PERIOD_INTERVALS_TABLE = "availability_period_intervals";
+    private static final String AVAILABILITY_PERIOD_INTERVALS_COLUMN_FOREIGN_KEY = "foreign_key";
+    private static final String AVAILABILITY_PERIOD_INTERVALS_COLUMN_INDEX = "array_index";
+    private static final String AVAILABILITY_PERIOD_INTERVALS_COLUMN_START_TIME = "start_time";
+    private static final String AVAILABILITY_PERIOD_INTERVALS_COLUMN_END_TIME = "end_time";
+    private static final String AVAILABILITY_PERIOD_INTERVALS_COLUMN_DAYS = "days";
 
     private static final String SERVICE_NAMES_TABLE = "service_names";
     private static final String SERVICE_NAMES_COLUMN_SERVICE_UID = "service_uid";
@@ -122,14 +129,21 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                 + SERVICE_NAMES_COLUMN_NAME + " TEXT, "
                 + SERVICE_NAMES_COLUMN_COUNTRY + " TEXT)"
         );
-
-       db.execSQL("CREATE TABLE " + AVAILABILITY_PERIOD_TABLE + " ("
-               + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
-               + AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
-               + AVAILABILITY_PERIOD_COLUMN_INDEX + " INTEGER NOT NULL, "
-               + AVAILABILITY_PERIOD_COLUMN_START_TIME + " TEXT NOT NULL, "
-               + AVAILABILITY_PERIOD_COLUMN_END_TIME + " TEXT NOT NULL)"
-       );
+        db.execSQL("CREATE TABLE " + AVAILABILITY_PERIOD_TABLE + " ("
+                + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
+                + AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
+                + AVAILABILITY_PERIOD_COLUMN_INDEX + " INTEGER NOT NULL, "
+                + AVAILABILITY_PERIOD_COLUMN_VALID_FROM + " INTEGER, "
+                + AVAILABILITY_PERIOD_COLUMN_VALID_TO + " INTEGER)"
+        );
+        db.execSQL("CREATE TABLE " + AVAILABILITY_PERIOD_INTERVALS_TABLE + " ("
+                + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
+                + AVAILABILITY_PERIOD_INTERVALS_COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
+                + AVAILABILITY_PERIOD_INTERVALS_COLUMN_INDEX + " INTEGER NOT NULL, "
+                + AVAILABILITY_PERIOD_INTERVALS_COLUMN_DAYS + " TEXT, "
+                + AVAILABILITY_PERIOD_INTERVALS_COLUMN_START_TIME + " INTEGER, "
+                + AVAILABILITY_PERIOD_INTERVALS_COLUMN_END_TIME + " INTEGER)"
+        );
     }
 
     @Override
@@ -142,6 +156,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
         db.execSQL("DROP TABLE IF EXISTS " + RELATED_MATERIALS_TABLE);
         db.execSQL("DROP TABLE IF EXISTS " + SERVICE_NAMES_TABLE);
         db.execSQL("DROP TABLE IF EXISTS " + AVAILABILITY_PERIOD_TABLE);
+        db.execSQL("DROP TABLE IF EXISTS " + AVAILABILITY_PERIOD_INTERVALS_TABLE);
         // TODO: delete dvbi services from the android channel database
         onCreate(db);
     }
@@ -384,12 +399,14 @@ public class DatabaseHandler extends SQLiteOpenHelper {
         updateContentGuide(db, service.getContentGuide());
         updateRelatedMaterials(db, FOREIGN_KEY_PREFIX_SERVICE + uid, service.getRelatedMaterials());
         updateServiceNames(db, uid, service.getDisplayNames());
+        updateServiceInstances(db, uid, service.getInstances());
+    }
 
-        List<ServiceInstance> instances = service.getInstances();
+    private void updateServiceInstances(SQLiteDatabase db, String uid, List<ServiceInstance> instances) {
         for (int i = 0; i < instances.size(); ++i) {
             ServiceInstance instance = instances.get(i);
-            params = new JSONObject();
-            values = new ContentValues();
+            JSONObject params = new JSONObject();
+            ContentValues values = new ContentValues();
             values.put(SERVICE_INSTANCES_COLUMN_SERVICE_UID, uid);
             values.put(SERVICE_INSTANCES_COLUMN_PRIORITY, instance.getPriority());
             values.put(SERVICE_INSTANCES_COLUMN_INDEX, i);
@@ -412,12 +429,13 @@ public class DatabaseHandler extends SQLiteOpenHelper {
             updateServiceNames(db, uid + "_" + i, instance.getDisplayNames());
             updateRelatedMaterials(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + i, instance.getRelatedMaterials());
 
-            InstanceAvailabilityPeriod availabilityPeriod = instance.getAvailabilityPeriod();
-            if (availabilityPeriod != null) {
-                updateAvailabilityPeriod(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + i, availabilityPeriod);
+            List<AvailabilityPeriod> availabilityPeriods = instance.getAvailabilityPeriods();
+            if (availabilityPeriods != null) {
+                updateAvailabilityPeriods(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + i, availabilityPeriods);
             }
         }
-        // in case there are less services than before, delete those that have
+
+        // in case there are less service instances than before, delete those that have
         // higher index than the size of the current list
         db.delete(SERVICE_INSTANCES_TABLE, SERVICE_INSTANCES_COLUMN_SERVICE_UID
                 + "='" + uid + "' AND " + SERVICE_INSTANCES_COLUMN_INDEX + ">="
@@ -458,22 +476,46 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                 + ">=" + materials.size(), null);
     }
 
-    private void updateAvailabilityPeriod(SQLiteDatabase db, String foreignKey, InstanceAvailabilityPeriod availabilityPeriod) {
-        List<String> startTimes = availabilityPeriod.getStartTimes();
-        List<String> endTimes = availabilityPeriod.getEndTimes();
-
-        for (int i = 0; i < startTimes.size(); i++) {
+    private void updateAvailabilityPeriods(SQLiteDatabase db, String foreignKey, List<AvailabilityPeriod> availabilityPeriods) {
+        for (int i = 0; i < availabilityPeriods.size(); i++) {
             ContentValues values = new ContentValues();
+            AvailabilityPeriod period = availabilityPeriods.get(i);
             values.put(AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY, foreignKey);
-            values.put(AVAILABILITY_PERIOD_COLUMN_START_TIME, startTimes.get(i));
-            values.put(AVAILABILITY_PERIOD_COLUMN_END_TIME, endTimes.get(i));
+            values.put(AVAILABILITY_PERIOD_COLUMN_VALID_FROM, period.getValidFrom());
+            values.put(AVAILABILITY_PERIOD_COLUMN_VALID_TO, period.getValidTo());
             values.put(AVAILABILITY_PERIOD_COLUMN_INDEX, i);
             if (db.update(AVAILABILITY_PERIOD_TABLE, values, AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY
-                    + "='" + foreignKey + "' AND " + AVAILABILITY_PERIOD_COLUMN_INDEX
-                    + "=" + i, null) == 0) {
+                    + "='" + foreignKey + "' AND " + AVAILABILITY_PERIOD_COLUMN_INDEX + "=" + i, null) == 0) {
                 db.insert(AVAILABILITY_PERIOD_TABLE, null, values);
             }
+            updateAvailabilityPeriodIntervals(db, foreignKey + "_" + i, period.getIntervals());
         }
+        // in case there are less availability periods than before, delete those that have
+        // higher index than the size of the current list
+        db.delete(AVAILABILITY_PERIOD_TABLE, AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY
+                + "='" + foreignKey + "' AND " + AVAILABILITY_PERIOD_COLUMN_INDEX
+                + ">=" + availabilityPeriods.size(), null);
+    }
+
+    private void updateAvailabilityPeriodIntervals(SQLiteDatabase db, String foreignKey, List<AvailabilityPeriod.Interval> intervals) {
+        for (int i = 0; i < intervals.size(); i++) {
+            ContentValues values = new ContentValues();
+            values.put(AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY, foreignKey);
+            values.put(AVAILABILITY_PERIOD_INTERVALS_COLUMN_START_TIME, intervals.get(i).getStartTime());
+            values.put(AVAILABILITY_PERIOD_INTERVALS_COLUMN_END_TIME, intervals.get(i).getEndTime());
+            values.put(AVAILABILITY_PERIOD_INTERVALS_COLUMN_DAYS, intervals.get(i).getDays());
+            values.put(AVAILABILITY_PERIOD_INTERVALS_COLUMN_INDEX, i);
+            if (db.update(AVAILABILITY_PERIOD_INTERVALS_TABLE, values, AVAILABILITY_PERIOD_INTERVALS_COLUMN_FOREIGN_KEY
+                    + "='" + foreignKey + "' AND " + AVAILABILITY_PERIOD_INTERVALS_COLUMN_INDEX
+                    + "=" + i, null) == 0) {
+                db.insert(AVAILABILITY_PERIOD_INTERVALS_TABLE, null, values);
+            }
+        }
+        // in case there are less availability period intervals than before, delete those that have
+        // higher index than the size of the current list
+        db.delete(AVAILABILITY_PERIOD_INTERVALS_TABLE, AVAILABILITY_PERIOD_INTERVALS_COLUMN_FOREIGN_KEY
+                + "='" + foreignKey + "' AND " + AVAILABILITY_PERIOD_INTERVALS_COLUMN_INDEX
+                + ">=" + intervals.size(), null);
     }
 
     private List<RelatedMaterial> getRelatedMaterials(SQLiteDatabase db, String foreignKey) {
@@ -507,19 +549,21 @@ public class DatabaseHandler extends SQLiteOpenHelper {
         return materials;
     }
 
-    private InstanceAvailabilityPeriod getAvailabilityPeriod(SQLiteDatabase db, String foreignKey) {
-        List<String> startTimes = new ArrayList<>();
-        List<String> endTimes = new ArrayList<>();
-        String[] projection = { AVAILABILITY_PERIOD_COLUMN_START_TIME, AVAILABILITY_PERIOD_COLUMN_END_TIME };
+    private List<AvailabilityPeriod> getAvailabilityPeriods(SQLiteDatabase db, String foreignKey) {
+        String[] projection = { AVAILABILITY_PERIOD_COLUMN_VALID_FROM, AVAILABILITY_PERIOD_COLUMN_VALID_TO, AVAILABILITY_PERIOD_COLUMN_INDEX };
+        ArrayList<AvailabilityPeriod> periods = new ArrayList<>();
         Cursor cursor = null;
         try {
             cursor = db.query(AVAILABILITY_PERIOD_TABLE, projection,
                     AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY + "='" + foreignKey + "'",
                     null, null, null, AVAILABILITY_PERIOD_COLUMN_INDEX);
             if (cursor != null) {
-                while (cursor.moveToNext()) {
-                    startTimes.add(cursor.getString(0));
-                    endTimes.add(cursor.getString(1));
+                while(cursor.moveToNext()) {
+                    periods.add(new AvailabilityPeriod.Builder()
+                            .setValidFrom(cursor.isNull(0) ? null : cursor.getLong(0))
+                            .setValidTo(cursor.isNull(1) ? null : cursor.getLong(1))
+                            .setIntervals(getAvailabilityPeriodIntervals(db, foreignKey + "_" + cursor.getInt(2)))
+                            .build());
                 }
             }
         } finally {
@@ -527,10 +571,32 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                 cursor.close();
             }
         }
-        return new InstanceAvailabilityPeriod.Builder()
-                .setStartTimes(startTimes)
-                .setEndTimes(endTimes)
-                .build();
+        return periods;
+    }
+
+    private List<AvailabilityPeriod.Interval> getAvailabilityPeriodIntervals(SQLiteDatabase db, String foreignKey) {
+        List<AvailabilityPeriod.Interval> intervals = new ArrayList<>();
+        String[] projection = { AVAILABILITY_PERIOD_INTERVALS_COLUMN_START_TIME, AVAILABILITY_PERIOD_INTERVALS_COLUMN_END_TIME, AVAILABILITY_PERIOD_INTERVALS_COLUMN_DAYS };
+        Cursor cursor = null;
+        try {
+            cursor = db.query(AVAILABILITY_PERIOD_INTERVALS_TABLE, projection,
+                    AVAILABILITY_PERIOD_INTERVALS_COLUMN_FOREIGN_KEY + "='" + foreignKey + "'",
+                    null, null, null, AVAILABILITY_PERIOD_INTERVALS_COLUMN_INDEX);
+            if (cursor != null) {
+                while (cursor.moveToNext()) {
+                    intervals.add(new AvailabilityPeriod.Interval.Builder()
+                            .setStartTime(cursor.isNull(0) ? null : cursor.getInt(0))
+                            .setEndTime(cursor.isNull(0) ? null : cursor.getInt(1))
+                            .setDays(cursor.getString(2))
+                            .build());
+                }
+            }
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
+        return intervals;
     }
 
     private List<ServiceInstance> getServiceInstancesForUID(SQLiteDatabase db, String uid) {
@@ -560,7 +626,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                                     .setDeliveryParameters(deliveryParams)
                                     .setTriplet(triplet)
                                     .setRelatedMaterials(getRelatedMaterials(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + cursor.getInt(2)))
-                                    .setAvailabilityPeriods(getAvailabilityPeriod(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + cursor.getInt(2)))
+                                    .setAvailabilityPeriods(getAvailabilityPeriods(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + cursor.getInt(2)))
                                     .build());
                 }
             }

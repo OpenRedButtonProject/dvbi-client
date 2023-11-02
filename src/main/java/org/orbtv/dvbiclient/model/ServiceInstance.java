@@ -1,24 +1,17 @@
 package org.orbtv.dvbiclient.model;
 
-import org.json.JSONException;
-import org.json.JSONObject;
 import org.xmlpull.v1.XmlPullParser;
 
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.TimeZone;
 
 public class ServiceInstance implements IService {
     private Map<String, String> mDisplayNames = new HashMap<>();
     private String mServiceName;
     private int mPriority;
-    private InstanceAvailabilityPeriod mAvailabilityPeriods;
+    private List<AvailabilityPeriod> mAvailabilityPeriods = new ArrayList<>();
     private Triplet mTriplet;
     private String mDeliveryType;
     private Map<String, String> mDeliveryParameters = new HashMap<>();
@@ -38,7 +31,7 @@ public class ServiceInstance implements IService {
         return mPriority;
     }
 
-    public InstanceAvailabilityPeriod getAvailabilityPeriod() {
+    public List<AvailabilityPeriod> getAvailabilityPeriods() {
         return mAvailabilityPeriods;
     }
 
@@ -91,12 +84,10 @@ public class ServiceInstance implements IService {
                         instance.mPriority = Integer.parseInt(xpp.getAttributeValue(null, "priority"));
                         break;
                     case "Availability":
-                        System.out.println("GEP found availability1 !!!!!!");
-                        instance.mAvailabilityPeriods = InstanceAvailabilityPeriod.parseFromXML(xpp);
+                        instance.mAvailabilityPeriods = AvailabilityPeriod.parseFromXML(xpp);
                         break;
                     case "RelatedMaterial":
-                        RelatedMaterial relatedMaterial = RelatedMaterial.parseFromXML(xpp);
-                        instance.mRelatedMaterials.add(relatedMaterial);
+                        instance.mRelatedMaterials.add(RelatedMaterial.parseFromXML(xpp));
                         break;
                     case "DVBTriplet":
                         instance.mTriplet = Triplet.parseFromXML(xpp);
@@ -193,7 +184,7 @@ public class ServiceInstance implements IService {
             mInstance.mPriority = value;
             return this;
         }
-        public ServiceInstance.Builder setAvailabilityPeriods(InstanceAvailabilityPeriod value) {
+        public ServiceInstance.Builder setAvailabilityPeriods(List<AvailabilityPeriod> value) {
             mInstance.mAvailabilityPeriods = value;
             return this;
         }

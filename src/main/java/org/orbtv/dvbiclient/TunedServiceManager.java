@@ -5,6 +5,7 @@ import android.util.Log;
 
 import org.orbtv.companionlibrary.utils.AsyncUtils;
 import org.orbtv.dvbiclient.model.ContentGuide;
+import org.orbtv.dvbiclient.model.AvailabilityPeriod;
 import org.orbtv.dvbiclient.model.Service;
 import org.orbtv.dvbiclient.model.ServiceInstance;
 import org.xmlpull.v1.XmlPullParser;
@@ -17,12 +18,8 @@ import java.io.InputStreamReader;
 import java.io.StringReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
-import java.util.TimeZone;
 
 public class TunedServiceManager {
     private static final String TAG = TunedServiceManager.class.getSimpleName();
@@ -69,13 +66,7 @@ public class TunedServiceManager {
                     mCallback.onEpgEventsUpdated();
                     if (mTunedService == service) {
                         mCallback.onInstanceChanged(null, mTunedInstance);
-                        if (instanceIndex >= 0) {
-                            if (mTunedInstance.getAvailabilityPeriod() != null && !mTunedInstance.getAvailabilityPeriod().getStartTimes().isEmpty()) {
-                                startInstanceAvailabilityThread(true);
-                            }
-                        } else {
-                            startInstanceAvailabilityThread(false);
-                        }
+                        startInstanceAvailabilityThread(instanceIndex >= 0);
                     }
                 }
             }
@@ -156,36 +147,32 @@ public class TunedServiceManager {
     }
 
     private boolean isInstanceAvailable(ServiceInstance instance) {
-        boolean result = false;
-        if (instance.getAvailabilityPeriod() == null || instance.getAvailabilityPeriod().getStartTimes().isEmpty()) {
-            result = true;
+        List<AvailabilityPeriod> periods = instance.getAvailabilityPeriods();
+        if (periods == null || periods.isEmpty()) {
+            return true;
         }
-        else {
-            long currentTime = System.currentTimeMillis() % 86400000; // TODO: may need to remove modulo operation
-            List<String> startTimes = instance.getAvailabilityPeriod().getStartTimes();
-            List<String> endTimes = instance.getAvailabilityPeriod().getEndTimes();
-            for (int i = 0; i < startTimes.size(); ++i) {
-                long start = convertToMillis(startTimes.get(i));
-                long end = convertToMillis(endTimes.get(i));
-                if (currentTime >= start && currentTime < end) {
-                    result = true;
-                    break;
+        long currentTimestamp = System.currentTimeMillis() / 1000;
+        List<AvailabilityPeriod.Interval> intervals;
+        for (AvailabilityPeriod period : periods) {
+            if (period.getValidTo() == null ||
+                    (currentTimestamp >= period.getValidFrom() && currentTimestamp < period.getValidTo())) {
+                intervals = period.getIntervals();
+                if (intervals == null || intervals.isEmpty()) {
+                    return true;
+                }
+                else {
+                    long secondsOfDay = currentTimestamp % 86400;
+                    String dayOfWeek = String.valueOf((currentTimestamp / 86400 + 3) % 7 + 1); // +3 as Epoch was Thursday and +1 as Monday should be 1
+                    for (AvailabilityPeriod.Interval interval : intervals) {
+                        if ((interval.getDays() == null || interval.getDays().contains(dayOfWeek)) &&
+                                (interval.getStartTime() == null || secondsOfDay >= interval.getStartTime() && secondsOfDay < interval.getEndTime())) {
+                            return true;
+                        }
+                    }
                 }
             }
         }
-        return result;
-    }
-
-    private long convertToMillis(String timeString) {
-        try {
-            SimpleDateFormat format = new SimpleDateFormat("HH:mm:ss'Z'");
-            format.setTimeZone(TimeZone.getTimeZone("UTC"));
-            Date date = format.parse(timeString);
-            return date.getTime();
-        } catch (ParseException e) {
-            e.printStackTrace();
-            return 0;
-        }
+        return false;
     }
 
     public void requestEpgMetadata(boolean nowNext, String startTime, String endTime) {
@@ -329,7 +316,8 @@ public class TunedServiceManager {
                 try {
                     Thread.sleep(1000);
                 } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
+                    e.printStackTrace();
+                    stop();
                 }
             }
             Log.i(TAG, "Stopped AvailabilityPeriodRunnable.");
