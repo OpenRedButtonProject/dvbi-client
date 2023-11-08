@@ -1,6 +1,7 @@
 package org.orbtv.dvbiclient;
 
 import android.content.Context;
+import android.media.tv.TvInputManager;
 import android.media.tv.TvTrackInfo;
 import android.util.Log;
 import android.view.View;
@@ -118,7 +119,7 @@ public class DvbIClient {
                     if (app_1_2 == null) {
                         if (!mBlocked) {
                             if ("dvb-dash".equals(toInstance.getDeliveryType())) {
-                                mTvInputCallback.tuneOff();
+                                mTvInputCallback.tuneOffBroadcast();
                                 if (mDvbIView.tune(uri, mSubtitlesEnabled)) {
                                     dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
                                 }
@@ -127,7 +128,7 @@ public class DvbIClient {
                                 mTracks.clear();
                                 mSelectedTracks.clear();
                                 mIsUnselected.clear();
-                                mTvInputCallback.tune(toInstance.getTriplet().toString());
+                                mTvInputCallback.tuneBroadcast(toInstance.getTriplet().toString());
                             }
                         }
                         else {
@@ -136,13 +137,13 @@ public class DvbIClient {
                             mSelectedTracks.clear();
                             mIsUnselected.clear();
                             dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_BLOCKED);
-                            mTvInputCallback.tuneOff();
+                            mTvInputCallback.tuneOffBroadcast();
                         }
                     } else {
-                        mTvInputCallback.tuneOff();
+                        mTvInputCallback.tuneOffBroadcast();
                         mDvbIView.tuneOff();
                         dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
-                        dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_PLAYING);
+                        mTvInputCallback.notifyVideoAvailable();
 
                         Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_1_2 + "' from Related Materials (" + app_1_2 + ")");
                         new GetXmlAitTask().execute(new XmlAitAttributes(app_1_2, LINKED_APP_SCHEME_1_2));
@@ -154,9 +155,10 @@ public class DvbIClient {
                     }
                 } else {
                     Log.i(TAG, "No service instance is currently available.");
-                    mTvInputCallback.tuneOff();
+                    mTvInputCallback.tuneOffBroadcast();
                     mDvbIView.tuneOff();
                     channel = channelBuilder.setServiceInstance(fromInstance).build();
+                    mTvInputCallback.notifyVideoAvailable();
                     dispatchPlayerStatusChangedEvent(
                             channel.getOnid(),
                             channel.getTsid(),
@@ -315,15 +317,24 @@ public class DvbIClient {
                 sid = triplet.getServiceId();
             }
             dispatchPlayerStatusChangedEvent(onid, tsid, sid, eventName);
-            if (PLAYER_STATUS_PLAYING.equals(eventName)) {
-                DvbIChannelAdapter channel = mServiceManager.getTunedChannel();
-                if (channel != null) {
-                    String appUri = channel.getLinkedAppUri(LINKED_APP_SCHEME_1_1);
-                    if (appUri != null) {
-                        Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_1_1 + "' from Related Materials (" + appUri + ")");
-                        new GetXmlAitTask().execute(new XmlAitAttributes(appUri, LINKED_APP_SCHEME_1_1));
+            switch (eventName) {
+                case PLAYER_STATUS_PLAYING:
+                    DvbIChannelAdapter channel = mServiceManager.getTunedChannel();
+                    if (channel != null) {
+                        mTvInputCallback.notifyVideoAvailable();
+                        String appUri = channel.getLinkedAppUri(LINKED_APP_SCHEME_1_1);
+                        if (appUri != null) {
+                            Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_1_1 + "' from Related Materials (" + appUri + ")");
+                            new GetXmlAitTask().execute(new XmlAitAttributes(appUri, LINKED_APP_SCHEME_1_1));
+                        }
                     }
-                }
+                    break;
+                case PLAYER_STATUS_BAD_CONNECTION:
+                    mTvInputCallback.notifyVideoUnavailable(TvInputManager.VIDEO_UNAVAILABLE_REASON_WEAK_SIGNAL);
+                    break;
+                case PLAYER_STATUS_ERROR:
+                    mTvInputCallback.notifyVideoUnavailable(TvInputManager.VIDEO_UNAVAILABLE_REASON_UNKNOWN);
+                    break;
             }
             Log.i(TAG, "Received video event " + eventName);
         }
