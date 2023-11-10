@@ -67,10 +67,6 @@ public class DvbIClient {
         put(TvTrackInfo.TYPE_VIDEO, "video");
         put(TvTrackInfo.TYPE_SUBTITLE, "text");
     }};
-    private static final List<String> STREAM_EVENTS = new ArrayList<>(Arrays.asList(
-            PLAYER_EVENT_APP_SIGNALLING,
-            PLAYER_EVENT_EPG_METADATA
-    ));
 
     private final DvbIView mDvbIView;
     private final HashMap<Integer, String> mStreamEventsLookup = new HashMap<>();
@@ -184,6 +180,7 @@ public class DvbIClient {
 
         @Override
         public void onVideoEvent(String eventName, JSONObject data) {
+            Log.i(TAG, "Received video event " + eventName);
             switch (eventName) {
                 case TRACKS_UPDATED_EVENT:
                     handleTracksUpdate(data);
@@ -194,7 +191,7 @@ public class DvbIClient {
                 default:
                     if (HBBTV_CHANNEL_STATUS_LOOKUP.containsKey(eventName)) {
                         handleChannelStatusChange(eventName);
-                    } else if (STREAM_EVENTS.contains(eventName)) {
+                    } else {
                         handleStreamEventDispatch(eventName, data);
                     }
                     break;
@@ -286,14 +283,24 @@ public class DvbIClient {
                         .setLanguage(new Locale(language).getISO3Language())
                         .setEncrypted(!track.isNull("contentProtection"))
                         .setEncoding(track.getString("mimeType"));
-                if (trackType == TvTrackInfo.TYPE_AUDIO) {
-                    if ("descriptions".equals(track.getString("kind"))) {
-                        builder.setDescription("AD")
-                                .setAudioDescription(true);
-                    }
-                    builder.setAudioChannelCount(track.getInt("audioChannelConfiguration"));
-                } else if (trackType == TvTrackInfo.TYPE_VIDEO) {
-                    builder.setVideoPixelAspectRatio((float)track.getDouble("aspectRatio"));
+                switch (trackType) {
+                    case TvTrackInfo.TYPE_AUDIO:
+                        if ("descriptions".equals(track.getString("kind"))) {
+                            builder.setDescription("AD")
+                                    .setAudioDescription(true);
+                        }
+                        builder.setAudioChannelCount(track.getInt("audioChannelConfiguration"));
+                        break;
+                    case TvTrackInfo.TYPE_VIDEO:
+                        builder.setVideoPixelAspectRatio((float)track.getDouble("aspectRatio"));
+                        break;
+                    case TvTrackInfo.TYPE_SUBTITLE:
+                        if ("hearingImpaired".equals(track.getString("kind"))) {
+                            builder.setHardOfHearing(true);
+                        }
+                        break;
+                    default:
+                        break;
                 }
             }
             catch (JSONException e) {
@@ -336,7 +343,6 @@ public class DvbIClient {
                     mTvInputCallback.notifyVideoUnavailable(TvInputManager.VIDEO_UNAVAILABLE_REASON_UNKNOWN);
                     break;
             }
-            Log.i(TAG, "Received video event " + eventName);
         }
 
         private synchronized void handleStreamEventDispatch(String eventName, JSONObject data) {
@@ -432,13 +438,17 @@ public class DvbIClient {
     public synchronized boolean subscribeStreamEvent(int listenId, String targetUrl, String eventName) {
         if (targetUrl != null) {
             mStreamEventsLookup.put(listenId, targetUrl);
+            mDvbIView.addStreamEventListener(targetUrl);
             return true;
         }
         return false;
     }
 
     public synchronized void unsubscribeStreamEvent(int listenId) {
-        mStreamEventsLookup.remove(listenId);
+        if (mStreamEventsLookup.containsKey(listenId)) {
+            mDvbIView.removeStreamEventListener(mStreamEventsLookup.get(listenId));
+            mStreamEventsLookup.remove(listenId);
+        }
     }
 
     public synchronized List<TvTrackInfo> getTracks() {

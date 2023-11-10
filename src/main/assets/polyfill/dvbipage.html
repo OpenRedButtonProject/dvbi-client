@@ -10,6 +10,13 @@
         let _video;
         let _lastSource;
         let _subs;
+        const _events = { };
+        const PLAYER_EVENT_APP_SIGNALLING = "urn:dvb:dash:appsignalling:2016";
+        const PLAYER_EVENT_EPG_METADATA = "urn:dvb:iptv:cpm:2014";
+
+        function _streamEventHandler(payload) {
+            Android.onVideoEvent(payload.type, JSON.stringify(payload.event));
+        }
 
         function _setTrackEnabled(type, enable) {
             let result = false;
@@ -119,6 +126,11 @@
                 }
                 return '';
             }
+            function extractKindFromSubtitleTrack() {
+                if (mediaInfo.accessibility[0] == "2") {
+                    return "hearingImpaired";
+                }
+            }
             switch (mediaInfo.type) {
                 case "video":
                     result.kind = extractKindFromVideoTrack();
@@ -131,6 +143,7 @@
                     result.audioChannelConfiguration = mediaInfo.audioChannelConfiguration[0];
                     break;
                 case "text":
+                    result.kind = extractKindFromSubtitleTrack();
                     break;
                 default:
                     return undefined;
@@ -156,14 +169,14 @@
                 Android.onVideoEvent('DVBI_PLAYBACK_STALLED', JSON.stringify(e));
             });
 
-            _player.on('urn:dvb:dash:appsignalling:2016', function (payload) {
+            _player.on(PLAYER_EVENT_APP_SIGNALLING, function (payload) {
                 //payload.event.messageData = payload.event.messageData.replace(/hbbtv1.test\/_TESTSUITE\/TESTS/g, "192.168.1.179/hbbtv_tests");
                 //payload.event.messageData = payload.event.messageData.replace(/.html5/g, ".html");
                 console.log(payload);
                 Android.onVideoEvent(payload.type, JSON.stringify(payload.event));
             });
 
-            _player.on('urn:dvb:iptv:cpm:2014', function (e) {
+            _player.on(PLAYER_EVENT_EPG_METADATA, function (e) {
                 e.event.messageData = e.event.messageData.replace("<BroadcastEvent>", "<BroadcastEvent xmlns:mpeg7='" + e.type + "'>");
                 console.log(e);
                 Android.onVideoEvent(e.type, JSON.stringify(e.event));
@@ -196,6 +209,10 @@
         function orb_loadMedia(url, enableSubs) {
             if (_lastSource !== url) {
                 _lastSource = url;
+                for (const e in _events) {
+                    _events[e] = 0;
+                    _player.off(e, _streamEventHandler);
+                }
                 _player.attachSource(url);
             }
             else {
@@ -227,6 +244,30 @@
                 Android.onVideoEvent('DVBI_TRACK_CHANGED', JSON.stringify({type:type}));
             }
         }
+
+        function orb_addStreamEventListener(eventName) {
+            if (eventName !== PLAYER_EVENT_APP_SIGNALLING && eventName !== PLAYER_EVENT_EPG_METADATA) {
+                if (!_events[eventName]) {
+                    _events[eventName] = 1;
+                    _player.on(eventName, _streamEventHandler);
+                }
+                else {
+                    _events[eventName]++;
+                }
+                console.log("Added event listener for event " + eventName);
+            }
+        }
+
+        function orb_removeStreamEventListener(eventName) {
+            if (_events[eventName]) {
+                _events[eventName]--;
+                if (_events[eventName] <= 0) {
+                    _player.off(eventName, _streamEventHandler);
+                }
+                console.log("Removed event listener for event " + eventName);
+            }
+        }
+
         function orb_setVideoRectangle(x, y, width, height) {
             _video.style.left = x + 'px';
             _video.style.top = y + 'px';

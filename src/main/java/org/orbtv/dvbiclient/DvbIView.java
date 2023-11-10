@@ -135,6 +135,18 @@ public class DvbIView extends WebView {
         });
     }
 
+    public void addStreamEventListener(String eventName) {
+        mContext.getMainExecutor().execute(() -> {
+            evaluateJavascript("orb_addStreamEventListener('" + eventName + "')", null);
+        });
+    }
+
+    public void removeStreamEventListener(String eventName) {
+        mContext.getMainExecutor().execute(() -> {
+            evaluateJavascript("orb_removeStreamEventListener('" + eventName + "')", null);
+        });
+    }
+
     public void setPresentationSuspended(boolean suspend) {
         synchronized (mIsSuspended) {
             if (mIsSuspended != suspend) {
