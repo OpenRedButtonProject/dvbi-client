@@ -1,11 +1,9 @@
 package org.orbtv.dvbiclient.model;
 
-import android.util.Log;
+import static org.orbtv.dvbiclient.Utils.getSecondsFromDate;
+import static org.orbtv.dvbiclient.Utils.getSecondsFromTime;
 
 import org.xmlpull.v1.XmlPullParser;
-
-import java.time.Instant;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -41,13 +39,13 @@ public final class AvailabilityPeriod {
                     case "Period":
                         builder = new Builder();
                         intervals = new ArrayList<>();
-                        builder.setValidFrom(dateStringToSeconds(xpp.getAttributeValue(null, "validFrom")))
-                                .setValidTo(dateStringToSeconds(xpp.getAttributeValue(null, "validTo")));
+                        builder.setValidFrom(getSecondsFromDate(xpp.getAttributeValue(null, "validFrom")))
+                                .setValidTo(getSecondsFromDate(xpp.getAttributeValue(null, "validTo")));
                         break;
                     case "Interval":
                         intervals.add(new Interval.Builder()
-                                .setStartTime(timeStringToSeconds(xpp.getAttributeValue(null, "startTime")))
-                                .setEndTime(timeStringToSeconds(xpp.getAttributeValue(null, "endTime")))
+                                .setStartTime(getSecondsFromTime(xpp.getAttributeValue(null, "startTime")))
+                                .setEndTime(getSecondsFromTime(xpp.getAttributeValue(null, "endTime")))
                                 .setDays(xpp.getAttributeValue(null, "days"))
                                 .build());
                         break;
@@ -59,33 +57,6 @@ public final class AvailabilityPeriod {
             eventType = xpp.next();
         }
         return periods;
-    }
-
-    private static Long dateStringToSeconds(String dateString) {
-        if (dateString != null) {
-            try {
-                Instant instant = Instant.parse(dateString);
-                return instant.getEpochSecond();
-            } catch (DateTimeParseException e) {
-                e.printStackTrace();
-            }
-        }
-        return null;
-    }
-
-    private static Integer timeStringToSeconds(String timeString) {
-        if (timeString != null) {
-            try {
-                String[] parts = timeString.split(":");
-                int hours = Integer.parseInt(parts[0]);
-                int minutes = Integer.parseInt(parts[1]);
-                int seconds = Integer.parseInt(parts[2].substring(0, 2)); // Remove the 'Z' character
-                return hours * 3600 + minutes * 60 + seconds;
-            } catch (NumberFormatException | ArrayIndexOutOfBoundsException e) {
-                e.printStackTrace();
-            }
-        }
-        return null;
     }
 
     public static final class Interval {

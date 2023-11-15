@@ -1,6 +1,7 @@
 package org.orbtv.dvbiclient;
 
 import android.content.Context;
+import android.media.tv.TvContentRating;
 import android.media.tv.TvInputManager;
 import android.media.tv.TvTrackInfo;
 import android.util.Log;
@@ -12,7 +13,9 @@ import org.json.JSONObject;
 import org.orbtv.companionlibrary.callbacks.DvbCallback;
 import org.orbtv.companionlibrary.callbacks.HbbTVCallback;
 import org.orbtv.companionlibrary.model.DvbChannel;
+import org.orbtv.companionlibrary.model.EventPeriod;
 import org.orbtv.companionlibrary.model.InternalProviderData;
+import org.orbtv.companionlibrary.model.Program;
 import org.orbtv.companionlibrary.utils.AsyncUtils;
 import org.orbtv.dvbiclient.model.*;
 
@@ -22,9 +25,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.security.KeyPair;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -53,6 +54,7 @@ public class DvbIClient {
     public static final String LINKED_APP_SCHEME_1_2 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:1.2";
     public static final String LINKED_APP_SCHEME_2 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:2";
     public static final String LINKED_APP_SCHEME_1000_1 = "urn:dvb:metadata:cs:HowRelatedCS:2020:1000.1";
+
     private static final Map<String, Integer> HBBTV_CHANNEL_STATUS_LOOKUP = new HashMap<String, Integer>() {{
         // key names according to the events received from Javascript interface in DvbIView,
         // values according to DvbGlue CHANNEL_CHANGE codes as expected in TvInputService
@@ -81,25 +83,9 @@ public class DvbIClient {
     private boolean mSubtitlesEnabled = false;
     private HashMap<Integer, Boolean> mIsUnselected = new HashMap<>();
     private final ITvInputCallback mTvInputCallback;
+    private final EpgManager mEpgManager;
 
     private final TunedServiceManager mServiceManager = new TunedServiceManager(new TunedServiceManager.Callback() {
-        @Override
-        public void onEpgEventsUpdated() {
-            mBlocked = false;
-            List<TunedServiceManager.EpgMetadata> epgMetadata = mServiceManager.getEpgMetadata();
-            if (epgMetadata != null) {
-                Service service = mServiceManager.getTunedService();
-                int rating = mTvInputCallback.getParentalControlAge();
-                mBlocked = service.getParentalRating() != null && service.getParentalRating() < rating;
-                if (!epgMetadata.isEmpty() && epgMetadata.get(0).getParentalRating() != null) {
-                    mBlocked = epgMetadata.get(0).getParentalRating() > rating;
-                }
-                for (HbbTVCallback callback : mHbbTVCallbacks) {
-                    callback.onParentalRatingChange(mBlocked);
-                }
-            }
-        }
-
         @Override
         public void onInstanceChanged(ServiceInstance fromInstance, ServiceInstance toInstance) {
             DvbIChannelAdapter channel;
@@ -363,24 +349,21 @@ public class DvbIClient {
             }
             switch (eventName) {
                 case PLAYER_EVENT_APP_SIGNALLING:
-                    if (data != null) {
-                        try {
-                            String messageData = data.getString("messageData");
-                            for (Callback cb : mCallbacks) {
-                                cb.onProcessXmlAit(messageData, LINKED_APP_SCHEME_1_1);
-                            }
-                        } catch (JSONException e) {
-                            e.printStackTrace();
+                    try {
+                        String messageData = data.getString("messageData");
+                        for (Callback cb : mCallbacks) {
+                            cb.onProcessXmlAit(messageData, LINKED_APP_SCHEME_1_1);
                         }
+                    } catch (Exception e) {
+                        e.printStackTrace();
                     }
                     break;
                 case PLAYER_EVENT_EPG_METADATA:
-                    if (data != null) {
-                        try {
-                            mServiceManager.updateEpgMetadata(data.getString("messageData"));
-                        } catch (JSONException e) {
-                            e.printStackTrace();
-                        }
+                    try {
+                        mEpgManager.requestUpdateFromContentGuideSourceXML(
+                                mServiceManager.getTunedService(), data.getString("messageData"));
+                    } catch (Exception e) {
+                        e.printStackTrace();
                     }
                     break;
             }
@@ -393,6 +376,22 @@ public class DvbIClient {
         mDbHandler = new DatabaseHandler(context);
         mDvbIView = new DvbIView(context);
         mDvbIView.addJSCallback(mJSCallback);
+        mEpgManager = new EpgManager(mDbHandler);
+        mEpgManager.registerCallback(serviceUID -> {
+            Service service = mServiceManager.getTunedService();
+            if (serviceUID.equals(service.getUniqueIdentifier())) {
+                int rating = mTvInputCallback.getParentalControlAge();
+                mBlocked = service.getParentalRating() != null && service.getParentalRating() < rating;
+                long currentTime = System.currentTimeMillis() / 1000;
+                List<Programme> programmes = mDbHandler.getProgrammesForService(serviceUID, currentTime, currentTime, 1);
+                if (!programmes.isEmpty()) {
+                    mBlocked = programmes.get(0).getParentalRating() > rating;
+                }
+                for (HbbTVCallback callback1 : mHbbTVCallbacks) {
+                    callback1.onParentalRatingChange(mBlocked);
+                }
+            }
+        });
     }
 
     public static void instantiate(ITvInputCallback callback) {
@@ -559,6 +558,20 @@ public class DvbIClient {
         return ret;
     }
 
+    public List<Program> getListOfEvents(DvbChannel channel, long startMs, long endMs) {
+        return getProgramsForDvbChannel(channel, startMs / 1000, endMs / 1000, Integer.MAX_VALUE);
+    }
+
+    public List<Program> getNowNextEvents(DvbChannel channel) {
+        long currentTime = System.currentTimeMillis() / 1000;
+        return getProgramsForDvbChannel(channel, currentTime, currentTime + 86400, 2);
+    }
+
+    public List<EventPeriod> getListOfUpdatedEventPeriods() {
+        ArrayList<EventPeriod> eventPeriods = new ArrayList<>();
+        return eventPeriods;
+    }
+
     public TunedServiceManager getServiceManager() {
         return mServiceManager;
     }
@@ -635,6 +648,55 @@ public class DvbIClient {
         return ret;
     }
 
+    private List<Program> getProgramsForDvbChannel(DvbChannel channel, long start, long end, Integer limit) {
+        ArrayList<Program> events = new ArrayList<>();
+        String uid = extractUidFromDvbChannel(channel);
+        if (uid != null) {
+            List<Programme> programmes = mDbHandler.getProgrammesForService(uid, start, end, limit);
+            for (Programme programme : programmes) {
+                InternalProviderData data = new InternalProviderData();
+                try {
+                    data.put("RATING", programme.getParentalRating());
+                } catch (InternalProviderData.ParseException e) {
+                    e.printStackTrace();
+                }
+                events.add(new Program.Builder()
+                        .setChannelId(channel.getId())
+                        .setTitle(programme.getTitle())
+                        .setDescription(programme.getShortDescription())
+                        .setLongDescription(programme.getLongDescription())
+                        .setStartTimeUtcMillis(programme.getStartTime() * 1000)
+                        .setEndTimeUtcMillis(programme.getEndTime() * 1000)
+                        .setContentRatings(createContentRating(programme.getParentalRating()))
+                        .setInternalProviderData(data)
+                        .build());
+            }
+        }
+        return events;
+    }
+
+    private String extractUidFromDvbChannel(DvbChannel channel) {
+        try {
+            InternalProviderData provider = channel.getInternalProviderData();
+            if (provider != null) {
+                return provider.get(KEY_DVBI_UID).toString();
+            }
+        } catch (InternalProviderData.ParseException ignored) {
+        }
+        return null;
+    }
+
+    private TvContentRating[] createContentRating(int rating) {
+        TvContentRating[] tvContentRatings = null;
+        if ((rating >= 4) && (rating <= 18)) {
+            tvContentRatings = new TvContentRating[]{
+                    TvContentRating.createRating("com.android.tv", "DVB",
+                            "DVB_" + rating)
+            };
+        }
+        return tvContentRatings;
+    }
+
     private DvbChannel createChannel(Service service) throws JSONException {
         DvbIChannelAdapter channel = new DvbIChannelAdapter.Builder().setService(service).build();
         InternalProviderData data = new InternalProviderData();
@@ -709,6 +771,7 @@ public class DvbIClient {
                     }
                     mDbHandler.updateServiceList(serviceList);
                 }
+                mEpgManager.updateServiceLists();
             }
             catch(IOException e) {
                 Log.e(TAG, "Error sending request", e);

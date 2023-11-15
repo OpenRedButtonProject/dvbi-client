@@ -20,7 +20,7 @@ import java.util.Map;
 
 public class DatabaseHandler extends SQLiteOpenHelper {
     private static final String TAG = DatabaseHandler.class.getSimpleName();
-    private static final int DB_VERSION = 22;
+    private static final int DB_VERSION = 23;
     private static final String DB_NAME = "dvbi_db";
     private static final String FOREIGN_KEY_PREFIX_SERVICE = "service_";
     private static final String FOREIGN_KEY_PREFIX_INSTANCE = "instance_";
@@ -77,6 +77,16 @@ public class DatabaseHandler extends SQLiteOpenHelper {
     private static final String SERVICE_NAMES_COLUMN_SERVICE_UID = "service_uid";
     private static final String SERVICE_NAMES_COLUMN_NAME = "name";
     private static final String SERVICE_NAMES_COLUMN_COUNTRY = "country";
+
+    private static final String PROGRAMMES_TABLE = "programmes";
+    private static final String PROGRAMMES_COLUMN_FOREIGN_KEY = "foreign_key";
+    private static final String PROGRAMMES_COLUMN_TITLE = "name";
+    private static final String PROGRAMMES_COLUMN_SHORT_DESCRIPTION = "short_description";
+    private static final String PROGRAMMES_COLUMN_MEDIUM_DESCRIPTION = "medium_description";
+    private static final String PROGRAMMES_COLUMN_LONG_DESCRIPTION = "long_description";
+    private static final String PROGRAMMES_COLUMN_START_TIME = "start_time";
+    private static final String PROGRAMMES_COLUMN_END_TIME = "end_time";
+    private static final String PROGRAMMES_COLUMN_PARENTAL_RATING = "parental_rating";
 
     public DatabaseHandler(Context context) {
         super(context, DB_NAME, null, DB_VERSION);
@@ -144,6 +154,17 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                 + AVAILABILITY_PERIOD_INTERVALS_COLUMN_START_TIME + " INTEGER, "
                 + AVAILABILITY_PERIOD_INTERVALS_COLUMN_END_TIME + " INTEGER)"
         );
+        db.execSQL("CREATE TABLE " + PROGRAMMES_TABLE + " ("
+                + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
+                + PROGRAMMES_COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
+                + PROGRAMMES_COLUMN_TITLE + " TEXT, "
+                + PROGRAMMES_COLUMN_SHORT_DESCRIPTION + " TEXT, "
+                + PROGRAMMES_COLUMN_MEDIUM_DESCRIPTION + " TEXT, "
+                + PROGRAMMES_COLUMN_LONG_DESCRIPTION + " TEXT, "
+                + PROGRAMMES_COLUMN_START_TIME + " INTEGER NOT NULL, "
+                + PROGRAMMES_COLUMN_END_TIME + " INTEGER NOT NULL, "
+                + PROGRAMMES_COLUMN_PARENTAL_RATING + " INTEGER)"
+        );
     }
 
     @Override
@@ -157,6 +178,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
         db.execSQL("DROP TABLE IF EXISTS " + SERVICE_NAMES_TABLE);
         db.execSQL("DROP TABLE IF EXISTS " + AVAILABILITY_PERIOD_TABLE);
         db.execSQL("DROP TABLE IF EXISTS " + AVAILABILITY_PERIOD_INTERVALS_TABLE);
+        db.execSQL("DROP TABLE IF EXISTS " + PROGRAMMES_TABLE);
         // TODO: delete dvbi services from the android channel database
         onCreate(db);
     }
@@ -277,6 +299,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
             db.delete(SERVICES_TABLE, SERVICES_COLUMN_UNIQUE_IDENTIFIER + " NOT IN (" + uids + ")", null);
             db.delete(SERVICE_INSTANCES_TABLE, SERVICE_INSTANCES_COLUMN_SERVICE_UID + " NOT IN (" + uids + ")", null);
             db.delete(SERVICE_NAMES_TABLE, SERVICE_NAMES_COLUMN_SERVICE_UID + " NOT IN (" + uids + ")", null);
+            db.delete(PROGRAMMES_TABLE, PROGRAMMES_COLUMN_FOREIGN_KEY + " NOT IN (" + uids + ")", null);
             // TODO: delete related materials for non-existent services/instances
         }
         if (!cgsids.isEmpty()) {
@@ -284,6 +307,68 @@ public class DatabaseHandler extends SQLiteOpenHelper {
             Log.i(TAG, "Deleting content guides with CGSIDs not in " + cgsids);
             db.delete(CONTENT_GUIDES_TABLE, CONTENT_GUIDES_COLUMN_CGSID + " NOT IN (" + cgsids + ")", null);
         }
+    }
+
+    public synchronized void updateProgrammesForService(String serviceUID, List<Programme> programmes) {
+        SQLiteDatabase db = getWritableDatabase();
+        db.delete(PROGRAMMES_TABLE, SERVICE_INSTANCES_COLUMN_SERVICE_UID
+                + "='" + serviceUID + "'", null);
+        for (Programme programme : programmes) {
+            ContentValues values = new ContentValues();
+            values.put(PROGRAMMES_COLUMN_FOREIGN_KEY, serviceUID);
+            values.put(PROGRAMMES_COLUMN_TITLE, programme.getTitle());
+            values.put(PROGRAMMES_COLUMN_SHORT_DESCRIPTION, programme.getShortDescription());
+            values.put(PROGRAMMES_COLUMN_MEDIUM_DESCRIPTION, programme.getMediumDescription());
+            values.put(PROGRAMMES_COLUMN_LONG_DESCRIPTION, programme.getLongDescription());
+            values.put(PROGRAMMES_COLUMN_PARENTAL_RATING, programme.getParentalRating());
+            values.put(PROGRAMMES_COLUMN_START_TIME, programme.getStartTime());
+            values.put(PROGRAMMES_COLUMN_END_TIME, programme.getEndTime());
+            db.insert(SERVICES_TABLE, null, values);
+            Log.d(TAG, "Updated program: " + programme.getTitle());
+        }
+    }
+
+    public synchronized List<Programme> getProgrammesForService(String serviceUID, long startTime, long endTime, Integer limit) {
+        SQLiteDatabase db = getReadableDatabase();
+        ArrayList<Programme> programmes = new ArrayList<>();
+        String[] projection = { PROGRAMMES_COLUMN_TITLE, PROGRAMMES_COLUMN_SHORT_DESCRIPTION, PROGRAMMES_COLUMN_MEDIUM_DESCRIPTION,
+                PROGRAMMES_COLUMN_LONG_DESCRIPTION, PROGRAMMES_COLUMN_PARENTAL_RATING, PROGRAMMES_COLUMN_START_TIME,
+                PROGRAMMES_COLUMN_END_TIME };
+        String start = String.valueOf(startTime);
+        String end = String.valueOf(endTime);
+        String[] selectionArgs = { serviceUID, start, start, end, end, start, end, String.valueOf(limit) };
+        Cursor cursor = null;
+        try
+        {
+            cursor = db.query(PROGRAMMES_TABLE, projection,
+                    PROGRAMMES_COLUMN_FOREIGN_KEY + "= ? AND (((" +
+                            PROGRAMMES_COLUMN_START_TIME + " >= ? OR " + PROGRAMMES_COLUMN_END_TIME + " >= ?) AND (" +
+                            PROGRAMMES_COLUMN_START_TIME + " <= ? OR " + PROGRAMMES_COLUMN_END_TIME + " <= ?)) OR (" +
+                            PROGRAMMES_COLUMN_START_TIME + " <= ? AND " + PROGRAMMES_COLUMN_END_TIME + " >= ?)) LIMIT ?",
+                    selectionArgs, null, null, PROGRAMMES_COLUMN_START_TIME);
+            if (cursor != null) {
+                Programme.Builder builder = new Programme.Builder();
+                while (cursor.moveToNext()) {
+                    programmes.add(builder
+                            .setTitle(cursor.getString(0))
+                            .setShortDescription(cursor.getString(1))
+                            .setMediumDescription(cursor.getString(2))
+                            .setLongDescription(cursor.getString(3))
+                            .setParentalRating(cursor.getInt(4))
+                            .setStartTime(cursor.getLong(5))
+                            .setEndTime(cursor.getLong(6))
+                            .build());
+                }
+            }
+        }
+        finally
+        {
+            if (cursor != null)
+            {
+                cursor.close();
+            }
+        }
+        return programmes;
     }
 
     private List<Service> getServices(SQLiteDatabase db, String listUID) {
@@ -304,12 +389,8 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                 {
                     Triplet triplet = null;
                     try {
-                        String dvbUri = new JSONObject(new String(cursor.getBlob(3))).getString("hbbtv-i:DVBTriplet");
-                        if (dvbUri != null) {
-                            triplet = Triplet.parseFromURI(dvbUri);
-                        }
+                        triplet = Triplet.parseFromURI(new JSONObject(new String(cursor.getBlob(3))).getString("hbbtv-i:DVBTriplet"));
                     }
-                    catch (JSONException e) { }
                     catch (Exception e) {
                         e.printStackTrace();
                     }
@@ -378,6 +459,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
         values.put(SERVICES_COLUMN_LCN, service.getLCNNumber());
         values.put(SERVICES_COLUMN_SERVICE_TYPE, service.getServiceType());
         values.put(SERVICES_COLUMN_CONTENT_GUIDE_CGSID, (service.getContentGuide() == null ? null : service.getContentGuide().getCGSID()));
+        values.put(SERVICES_COLUMN_CONTENT_GUIDE_SERVICE_REF, service.getContentGuideServiceRef());
         if (service.getTriplet() != null) {
             try {
                 params.put("hbbtv-i:DVBTriplet", service.getTriplet());
