@@ -142,6 +142,7 @@ public class TunedServiceManager {
 
         public void stop() {
             mIsRunning = false;
+            Thread.currentThread().interrupt();
             Log.i(TAG, "Stopping AvailabilityPeriodRunnable...");
         }
 

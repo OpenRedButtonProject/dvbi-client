@@ -27,7 +27,7 @@ public class XmlNode {
             if (node.mName != null && node.mName.equals(name)) {
                 return node;
             }
-            XmlNode ret = getDescendantByName(name);
+            XmlNode ret = node.getDescendantByName(name);
             if (ret != null) {
                 return ret;
             }

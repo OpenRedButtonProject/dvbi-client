@@ -20,7 +20,7 @@ import java.util.Map;
 
 public class DatabaseHandler extends SQLiteOpenHelper {
     private static final String TAG = DatabaseHandler.class.getSimpleName();
-    private static final int DB_VERSION = 23;
+    private static final int DB_VERSION = 24;
     private static final String DB_NAME = "dvbi_db";
     private static final String FOREIGN_KEY_PREFIX_SERVICE = "service_";
     private static final String FOREIGN_KEY_PREFIX_INSTANCE = "instance_";
@@ -232,10 +232,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
             {
                 Triplet triplet = null;
                 try {
-                    String dvbUri = new JSONObject(new String(cursor.getBlob(3))).getString("hbbtv-i:DVBTriplet");
-                    if (dvbUri != null) {
-                        triplet = Triplet.parseFromURI(dvbUri);
-                    }
+                    triplet = Triplet.parseFromURI(new JSONObject(new String(cursor.getBlob(3))).getString("hbbtv-i:DVBTriplet"));
                 }
                 catch (Exception e) { }
                 service = new Service.Builder()
@@ -311,7 +308,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
 
     public synchronized void updateProgrammesForService(String serviceUID, List<Programme> programmes) {
         SQLiteDatabase db = getWritableDatabase();
-        db.delete(PROGRAMMES_TABLE, SERVICE_INSTANCES_COLUMN_SERVICE_UID
+        db.delete(PROGRAMMES_TABLE, PROGRAMMES_COLUMN_FOREIGN_KEY
                 + "='" + serviceUID + "'", null);
         for (Programme programme : programmes) {
             ContentValues values = new ContentValues();
@@ -323,7 +320,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
             values.put(PROGRAMMES_COLUMN_PARENTAL_RATING, programme.getParentalRating());
             values.put(PROGRAMMES_COLUMN_START_TIME, programme.getStartTime());
             values.put(PROGRAMMES_COLUMN_END_TIME, programme.getEndTime());
-            db.insert(SERVICES_TABLE, null, values);
+            db.insert(PROGRAMMES_TABLE, null, values);
             Log.d(TAG, "Updated program: " + programme.getTitle());
         }
     }
@@ -336,7 +333,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                 PROGRAMMES_COLUMN_END_TIME };
         String start = String.valueOf(startTime);
         String end = String.valueOf(endTime);
-        String[] selectionArgs = { serviceUID, start, start, end, end, start, end, String.valueOf(limit) };
+        String[] selectionArgs = { serviceUID, start, start, end, end, start, end, limit.toString() };
         Cursor cursor = null;
         try
         {
@@ -344,8 +341,9 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                     PROGRAMMES_COLUMN_FOREIGN_KEY + "= ? AND (((" +
                             PROGRAMMES_COLUMN_START_TIME + " >= ? OR " + PROGRAMMES_COLUMN_END_TIME + " >= ?) AND (" +
                             PROGRAMMES_COLUMN_START_TIME + " <= ? OR " + PROGRAMMES_COLUMN_END_TIME + " <= ?)) OR (" +
-                            PROGRAMMES_COLUMN_START_TIME + " <= ? AND " + PROGRAMMES_COLUMN_END_TIME + " >= ?)) LIMIT ?",
-                    selectionArgs, null, null, PROGRAMMES_COLUMN_START_TIME);
+                            PROGRAMMES_COLUMN_START_TIME + " <= ? AND " + PROGRAMMES_COLUMN_END_TIME + " >= ?)) ORDER BY " +
+                            PROGRAMMES_COLUMN_START_TIME + " LIMIT ?",
+                    selectionArgs, null, null, null);
             if (cursor != null) {
                 Programme.Builder builder = new Programme.Builder();
                 while (cursor.moveToNext()) {
@@ -391,9 +389,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                     try {
                         triplet = Triplet.parseFromURI(new JSONObject(new String(cursor.getBlob(3))).getString("hbbtv-i:DVBTriplet"));
                     }
-                    catch (Exception e) {
-                        e.printStackTrace();
-                    }
+                    catch (Exception e) { }
                     ret.add(serviceBuilder
                             .setServiceNames(getServiceNamesForUID(db, cursor.getString(1)))
                             .setProviderName(cursor.getString(0))

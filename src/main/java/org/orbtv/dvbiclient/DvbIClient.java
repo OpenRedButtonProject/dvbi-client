@@ -379,7 +379,7 @@ public class DvbIClient {
         mEpgManager = new EpgManager(mDbHandler);
         mEpgManager.registerCallback(serviceUID -> {
             Service service = mServiceManager.getTunedService();
-            if (serviceUID.equals(service.getUniqueIdentifier())) {
+            if (service != null && serviceUID.equals(service.getUniqueIdentifier())) {
                 int rating = mTvInputCallback.getParentalControlAge();
                 mBlocked = service.getParentalRating() != null && service.getParentalRating() < rating;
                 long currentTime = System.currentTimeMillis() / 1000;
@@ -681,7 +681,7 @@ public class DvbIClient {
             if (provider != null) {
                 return provider.get(KEY_DVBI_UID).toString();
             }
-        } catch (InternalProviderData.ParseException ignored) {
+        } catch (Exception e) {
         }
         return null;
     }
@@ -771,7 +771,7 @@ public class DvbIClient {
                     }
                     mDbHandler.updateServiceList(serviceList);
                 }
-                mEpgManager.updateServiceLists();
+                mEpgManager.refreshServiceLists();
             }
             catch(IOException e) {
                 Log.e(TAG, "Error sending request", e);

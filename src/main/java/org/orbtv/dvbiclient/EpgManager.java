@@ -20,6 +20,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,16 +29,19 @@ public class EpgManager {
     private static final String TAG = EpgManager.class.getSimpleName();
     private final DatabaseHandler mDbHandler;
     private final Object mLock = new Object();
-    private final EpgRunnable epgRunnable = new EpgRunnable();
+    private final EpgRunnable mEpgRunnable;
+    private final Thread mEpgThread;
     private final ArrayList<Callback> mCallbacks = new ArrayList<>();
 
     public EpgManager(DatabaseHandler dbHandler) {
         mDbHandler = dbHandler;
-        epgRunnable.run();
+        mEpgRunnable = new EpgRunnable();
+        mEpgThread = new Thread(mEpgRunnable);
+        mEpgThread.start();
     }
 
-    public void updateServiceLists() {
-        epgRunnable.updateServiceLists();
+    public void refreshServiceLists() {
+        mEpgRunnable.refreshServiceLists();
     }
 
     public void requestUpdateFromContentGuideSourceXML(Service service, String xml) {
@@ -87,10 +91,10 @@ public class EpgManager {
         private final HashMap<String, Uri> mScheduleUris = new HashMap<>();
 
         public EpgRunnable() {
-            updateServiceLists();
+            refreshServiceLists();
         }
 
-        public void updateServiceLists() {
+        public void refreshServiceLists() {
             List<ServiceList> serviceLists = mDbHandler.getServiceLists();
             synchronized (mLock) {
                 mScheduleUris.clear();
@@ -208,6 +212,10 @@ public class EpgManager {
 
         @Override
         public void onPostExecute(XmlNode epgMetadata) {
+            if (epgMetadata == null) {
+                return;
+            }
+            final List<String> parentalRatingNames = Arrays.asList("MinimumAge", "mpeg7:MinimumAge");
             List<XmlNode> scheduleEvents = epgMetadata.getDescendantsByName("ScheduleEvent");
             List<XmlNode> programmesInfo = epgMetadata.getDescendantsByName("ProgramInformation");
             ArrayList<Programme> programmes = new ArrayList<>();
@@ -219,10 +227,15 @@ public class EpgManager {
                         for (XmlNode event : scheduleEvents) {
                             XmlNode programNode = event.getDescendantByName("Program");
                             if (programNode != null && programId.equals(programNode.getAttribute("crid"))) {
-                                long startTime = getSecondsFromDate(event.getDescendantByName("PublishedStartTime").getInnerText());
-                                Duration duration = getDurationFromString(event.getDescendantByName("PublishedDuration").getInnerText());
-                                builder.setStartTime(startTime);
-                                builder.setEndTime(startTime + duration.getSeconds());
+                                try {
+                                    long startTime = getSecondsFromDate(event.getDescendantByName("PublishedStartTime").getInnerText());
+                                    Duration duration = getDurationFromString(event.getDescendantByName("PublishedDuration").getInnerText());
+                                    builder.setStartTime(startTime);
+                                    builder.setEndTime(startTime + duration.getSeconds());
+                                }
+                                catch (Exception e) {
+                                    e.printStackTrace();
+                                }
                                 break;
                             }
                         }
@@ -241,10 +254,18 @@ public class EpgManager {
                                 break;
                         }
                     }
+                    String minAge = "0";
+                    for (String name : parentalRatingNames) {
+                        XmlNode node = info.getDescendantByName(name);
+                        if (node != null) {
+                            minAge = node.getInnerText();
+                            break;
+                        }
+                    }
 
                     programmes.add(builder
                             .setTitle(info.getDescendantByName("Title").getInnerText())
-                            .setParentalRating(Integer.parseInt(info.getDescendantByName("MinimumAge").getInnerText()))
+                            .setParentalRating(Integer.parseInt(minAge))
                             .build());
                 }
                 catch (Exception e) {
