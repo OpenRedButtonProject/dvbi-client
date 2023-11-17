@@ -20,73 +20,26 @@ import java.util.Map;
 
 public class DatabaseHandler extends SQLiteOpenHelper {
     private static final String TAG = DatabaseHandler.class.getSimpleName();
-    private static final int DB_VERSION = 24;
+    private static final int DB_VERSION = 25;
     private static final String DB_NAME = "dvbi_db";
     private static final String FOREIGN_KEY_PREFIX_SERVICE = "service_";
     private static final String FOREIGN_KEY_PREFIX_INSTANCE = "instance_";
     private static final String COLUMN_ID = "id";
+    private static final String COLUMN_FOREIGN_KEY = "foreign_key";
+    private static final String COLUMN_INDEX = "array_index";
 
     private static final String SERVICE_LISTS_TABLE = "service_lists";
-    private static final String SERVICE_LISTS_COLUMN_NAME = "name";
-    private static final String SERVICE_LISTS_COLUMN_PROVIDER = "provider";
-    private static final String SERVICE_LISTS_COLUMN_UID = "uid";
-
     private static final String CONTENT_GUIDES_TABLE = "schedule_info_endpoints";
-    private static final String CONTENT_GUIDES_COLUMN_CGSID = "cgsid";
-    private static final String CONTENT_GUIDES_COLUMN_SCHEDUTE_INFO_URI = "schedule_info_uri";
-
     private static final String SERVICES_TABLE = "services";
-    private static final String SERVICES_COLUMN_FOREIGN_KEY = "foreign_key";
-    private static final String SERVICES_COLUMN_UNIQUE_IDENTIFIER = "unique_identifier";
-    private static final String SERVICES_COLUMN_LCN = "lcn";
-    private static final String SERVICES_COLUMN_PROVIDER = "provider";
-    private static final String SERVICES_COLUMN_ADDITIONAL_PARAMS = "additional_params";
-    private static final String SERVICES_COLUMN_SERVICE_TYPE = "service_type";
-    private static final String SERVICES_COLUMN_CONTENT_GUIDE_CGSID = "guide_cgsid";
-    private static final String SERVICES_COLUMN_PARENTAL_RATING = "parental_rating";
-    private static final String SERVICES_COLUMN_CONTENT_GUIDE_SERVICE_REF = "content_guide_service_ref";
-
     private static final String SERVICE_INSTANCES_TABLE = "service_instances";
-    private static final String SERVICE_INSTANCES_COLUMN_SERVICE_UID = "service_uid";
-    private static final String SERVICE_INSTANCES_COLUMN_INDEX = "array_index";
-    private static final String SERVICE_INSTANCES_COLUMN_PRIORITY = "priority";
-    private static final String SERVICE_INSTANCES_COLUMN_DELIVERY_PARAMS = "delivery_params";
-    private static final String SERVICE_INSTANCES_COLUMN_DELIVERY_TYPE = "delivery_type";
-
     private static final String RELATED_MATERIALS_TABLE = "related_materials";
-    private static final String RELATED_MATERIALS_COLUMN_FOREIGN_KEY = "foreign_key";
-    private static final String RELATED_MATERIALS_COLUMN_INDEX = "array_index";
-    private static final String RELATED_MATERIALS_COLUMN_HOW_RELATED_HREF = "how_related_href";
-    private static final String RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_URI = "media_locator_uri";
-    private static final String RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE = "media_locator_content_type";
-
     private static final String AVAILABILITY_PERIOD_TABLE = "availability_periods";
-    private static final String AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY = "foreign_key";
-    private static final String AVAILABILITY_PERIOD_COLUMN_INDEX = "array_index";
-    private static final String AVAILABILITY_PERIOD_COLUMN_VALID_FROM = "valid_from";
-    private static final String AVAILABILITY_PERIOD_COLUMN_VALID_TO = "valid_to";
-
     private static final String AVAILABILITY_PERIOD_INTERVALS_TABLE = "availability_period_intervals";
-    private static final String AVAILABILITY_PERIOD_INTERVALS_COLUMN_FOREIGN_KEY = "foreign_key";
-    private static final String AVAILABILITY_PERIOD_INTERVALS_COLUMN_INDEX = "array_index";
-    private static final String AVAILABILITY_PERIOD_INTERVALS_COLUMN_START_TIME = "start_time";
-    private static final String AVAILABILITY_PERIOD_INTERVALS_COLUMN_END_TIME = "end_time";
-    private static final String AVAILABILITY_PERIOD_INTERVALS_COLUMN_DAYS = "days";
+    private static final String PROGRAMMES_TABLE = "programmes";
 
     private static final String SERVICE_NAMES_TABLE = "service_names";
-    private static final String SERVICE_NAMES_COLUMN_SERVICE_UID = "service_uid";
     private static final String SERVICE_NAMES_COLUMN_NAME = "name";
     private static final String SERVICE_NAMES_COLUMN_COUNTRY = "country";
-
-    private static final String PROGRAMMES_TABLE = "programmes";
-    private static final String PROGRAMMES_COLUMN_FOREIGN_KEY = "foreign_key";
-    private static final String PROGRAMMES_COLUMN_TITLE = "name";
-    private static final String PROGRAMMES_COLUMN_SHORT_DESCRIPTION = "short_description";
-    private static final String PROGRAMMES_COLUMN_MEDIUM_DESCRIPTION = "medium_description";
-    private static final String PROGRAMMES_COLUMN_LONG_DESCRIPTION = "long_description";
-    private static final String PROGRAMMES_COLUMN_START_TIME = "start_time";
-    private static final String PROGRAMMES_COLUMN_END_TIME = "end_time";
-    private static final String PROGRAMMES_COLUMN_PARENTAL_RATING = "parental_rating";
 
     public DatabaseHandler(Context context) {
         super(context, DB_NAME, null, DB_VERSION);
@@ -96,74 +49,74 @@ public class DatabaseHandler extends SQLiteOpenHelper {
     public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE " + SERVICE_LISTS_TABLE + " ("
                 + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
-                + SERVICE_LISTS_COLUMN_UID + " TEXT NOT NULL UNIQUE, "
-                + SERVICE_LISTS_COLUMN_NAME + " TEXT, "
-                + SERVICE_LISTS_COLUMN_PROVIDER + " TEXT)"
+                + ServiceList.DB_COLUMN_UID + " TEXT NOT NULL UNIQUE, "
+                + ServiceList.DB_COLUMN_NAME + " TEXT, "
+                + ServiceList.DB_COLUMN_PROVIDER + " TEXT)"
         );
         db.execSQL("CREATE TABLE " + CONTENT_GUIDES_TABLE + " ("
                 + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
-                + CONTENT_GUIDES_COLUMN_CGSID + " TEXT NOT NULL UNIQUE, "
-                + CONTENT_GUIDES_COLUMN_SCHEDUTE_INFO_URI + " TEXT)"
+                + ContentGuide.DB_COLUMN_CGSID + " TEXT NOT NULL UNIQUE, "
+                + ContentGuide.DB_COLUMN_SCHEDULE_INFO_URI + " TEXT)"
         );
         db.execSQL("CREATE TABLE " + SERVICES_TABLE + " ("
                 + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
-                + SERVICES_COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
-                + SERVICES_COLUMN_UNIQUE_IDENTIFIER + " TEXT NOT NULL UNIQUE, "
-                + SERVICES_COLUMN_LCN + " TEXT,"
-                + SERVICES_COLUMN_PROVIDER + " TEXT,"
-                + SERVICES_COLUMN_SERVICE_TYPE + " TEXT,"
-                + SERVICES_COLUMN_CONTENT_GUIDE_CGSID + " TEXT,"
-                + SERVICES_COLUMN_PARENTAL_RATING + " INTEGER,"
-                + SERVICES_COLUMN_CONTENT_GUIDE_SERVICE_REF + " TEXT,"
-                + SERVICES_COLUMN_ADDITIONAL_PARAMS + " BLOB)"
+                + COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
+                + Service.DB_COLUMN_UNIQUE_IDENTIFIER + " TEXT NOT NULL UNIQUE, "
+                + Service.DB_COLUMN_LCN + " TEXT,"
+                + Service.DB_COLUMN_PROVIDER + " TEXT,"
+                + Service.DB_COLUMN_SERVICE_TYPE + " TEXT,"
+                + Service.DB_COLUMN_CONTENT_GUIDE_CGSID + " TEXT,"
+                + Service.DB_COLUMN_PARENTAL_RATING + " INTEGER,"
+                + Service.DB_COLUMN_CONTENT_GUIDE_SERVICE_REF + " TEXT,"
+                + Service.DB_COLUMN_ADDITIONAL_PARAMS + " BLOB)"
         );
         db.execSQL("CREATE TABLE " + SERVICE_INSTANCES_TABLE + " ("
                 + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
-                + SERVICE_INSTANCES_COLUMN_SERVICE_UID + " TEXT NOT NULL, "
-                + SERVICE_INSTANCES_COLUMN_INDEX + " INTEGER NOT NULL, "
-                + SERVICE_INSTANCES_COLUMN_PRIORITY + " INTEGER,"
-                + SERVICE_INSTANCES_COLUMN_DELIVERY_TYPE + " TEXT,"
-                + SERVICE_INSTANCES_COLUMN_DELIVERY_PARAMS + " BLOB)"
+                + COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
+                + COLUMN_INDEX + " INTEGER NOT NULL, "
+                + ServiceInstance.DB_COLUMN_PRIORITY + " INTEGER,"
+                + ServiceInstance.DB_COLUMN_DELIVERY_TYPE + " TEXT,"
+                + ServiceInstance.DB_COLUMN_DELIVERY_PARAMS + " BLOB)"
         );
         db.execSQL("CREATE TABLE " + RELATED_MATERIALS_TABLE + " ("
                 + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
-                + RELATED_MATERIALS_COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
-                + RELATED_MATERIALS_COLUMN_INDEX + " INTEGER NOT NULL, "
-                + RELATED_MATERIALS_COLUMN_HOW_RELATED_HREF + " TEXT, "
-                + RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_URI + " TEXT, "
-                + RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE + " TEXT)"
+                + COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
+                + COLUMN_INDEX + " INTEGER NOT NULL, "
+                + RelatedMaterial.DB_COLUMN_HOW_RELATED_HREF + " TEXT, "
+                + RelatedMaterial.DB_COLUMN_MEDIA_LOCATOR_URI + " TEXT, "
+                + RelatedMaterial.DB_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE + " TEXT)"
         );
         db.execSQL("CREATE TABLE " + SERVICE_NAMES_TABLE + " ("
                 + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
-                + SERVICE_NAMES_COLUMN_SERVICE_UID + " TEXT NOT NULL, "
+                + COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
                 + SERVICE_NAMES_COLUMN_NAME + " TEXT, "
                 + SERVICE_NAMES_COLUMN_COUNTRY + " TEXT)"
         );
         db.execSQL("CREATE TABLE " + AVAILABILITY_PERIOD_TABLE + " ("
                 + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
-                + AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
-                + AVAILABILITY_PERIOD_COLUMN_INDEX + " INTEGER NOT NULL, "
-                + AVAILABILITY_PERIOD_COLUMN_VALID_FROM + " INTEGER, "
-                + AVAILABILITY_PERIOD_COLUMN_VALID_TO + " INTEGER)"
+                + COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
+                + COLUMN_INDEX + " INTEGER NOT NULL, "
+                + AvailabilityPeriod.DB_COLUMN_VALID_FROM + " INTEGER, "
+                + AvailabilityPeriod.DB_COLUMN_VALID_TO + " INTEGER)"
         );
         db.execSQL("CREATE TABLE " + AVAILABILITY_PERIOD_INTERVALS_TABLE + " ("
                 + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
-                + AVAILABILITY_PERIOD_INTERVALS_COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
-                + AVAILABILITY_PERIOD_INTERVALS_COLUMN_INDEX + " INTEGER NOT NULL, "
-                + AVAILABILITY_PERIOD_INTERVALS_COLUMN_DAYS + " TEXT, "
-                + AVAILABILITY_PERIOD_INTERVALS_COLUMN_START_TIME + " INTEGER, "
-                + AVAILABILITY_PERIOD_INTERVALS_COLUMN_END_TIME + " INTEGER)"
+                + COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
+                + COLUMN_INDEX + " INTEGER NOT NULL, "
+                + AvailabilityPeriod.Interval.DB_COLUMN_DAYS + " TEXT, "
+                + AvailabilityPeriod.Interval.DB_COLUMN_START_TIME + " INTEGER, "
+                + AvailabilityPeriod.Interval.DB_COLUMN_END_TIME + " INTEGER)"
         );
         db.execSQL("CREATE TABLE " + PROGRAMMES_TABLE + " ("
                 + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
-                + PROGRAMMES_COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
-                + PROGRAMMES_COLUMN_TITLE + " TEXT, "
-                + PROGRAMMES_COLUMN_SHORT_DESCRIPTION + " TEXT, "
-                + PROGRAMMES_COLUMN_MEDIUM_DESCRIPTION + " TEXT, "
-                + PROGRAMMES_COLUMN_LONG_DESCRIPTION + " TEXT, "
-                + PROGRAMMES_COLUMN_START_TIME + " INTEGER NOT NULL, "
-                + PROGRAMMES_COLUMN_END_TIME + " INTEGER NOT NULL, "
-                + PROGRAMMES_COLUMN_PARENTAL_RATING + " INTEGER)"
+                + COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
+                + Programme.DB_COLUMN_TITLE + " TEXT, "
+                + Programme.DB_COLUMN_SHORT_DESCRIPTION + " TEXT, "
+                + Programme.DB_COLUMN_MEDIUM_DESCRIPTION + " TEXT, "
+                + Programme.DB_COLUMN_LONG_DESCRIPTION + " TEXT, "
+                + Programme.DB_COLUMN_START_TIME + " INTEGER NOT NULL, "
+                + Programme.DB_COLUMN_END_TIME + " INTEGER NOT NULL, "
+                + Programme.DB_COLUMN_PARENTAL_RATING + " INTEGER)"
         );
     }
 
@@ -187,7 +140,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
         SQLiteDatabase db = getReadableDatabase();
 
         ArrayList<ServiceList> ret = new ArrayList<>();
-        String[] projection = { SERVICE_LISTS_COLUMN_UID };
+        String[] projection = { ServiceList.DB_COLUMN_UID };
         Cursor cursor = null;
         try
         {
@@ -217,16 +170,16 @@ public class DatabaseHandler extends SQLiteOpenHelper {
     public synchronized Service getServiceForUID(String uid) {
         Service service = null;
         SQLiteDatabase db = getReadableDatabase();
-        String[] projection = { SERVICES_COLUMN_PROVIDER, SERVICES_COLUMN_UNIQUE_IDENTIFIER,
-                SERVICES_COLUMN_LCN, SERVICES_COLUMN_ADDITIONAL_PARAMS, SERVICES_COLUMN_SERVICE_TYPE,
-                SERVICES_COLUMN_CONTENT_GUIDE_CGSID, SERVICES_COLUMN_PARENTAL_RATING,
-                SERVICES_COLUMN_CONTENT_GUIDE_SERVICE_REF
+        String[] projection = { Service.DB_COLUMN_PROVIDER, Service.DB_COLUMN_UNIQUE_IDENTIFIER,
+                Service.DB_COLUMN_LCN, Service.DB_COLUMN_ADDITIONAL_PARAMS, Service.DB_COLUMN_SERVICE_TYPE,
+                Service.DB_COLUMN_CONTENT_GUIDE_CGSID, Service.DB_COLUMN_PARENTAL_RATING,
+                Service.DB_COLUMN_CONTENT_GUIDE_SERVICE_REF
         };
         Cursor cursor = null;
         try
         {
             cursor = db.query(SERVICES_TABLE, projection,
-                    SERVICES_COLUMN_UNIQUE_IDENTIFIER + "='" + uid + "'",
+                    Service.DB_COLUMN_UNIQUE_IDENTIFIER + "='" + uid + "'",
                     null, null, null, null);
             if (cursor != null && cursor.moveToFirst())
             {
@@ -264,12 +217,9 @@ public class DatabaseHandler extends SQLiteOpenHelper {
         SQLiteDatabase db = getWritableDatabase();
         String uids = "";
         String cgsids = "";
-        ContentValues values = new ContentValues();
-        values.put(SERVICE_LISTS_COLUMN_UID, serviceList.getUID());
-        values.put(SERVICE_LISTS_COLUMN_NAME, "myname");
-        values.put(SERVICE_LISTS_COLUMN_PROVIDER, "myprovider");
+        ContentValues values = serviceList.toContentValues();
 
-        if (db.update(SERVICE_LISTS_TABLE, values, SERVICE_LISTS_COLUMN_UID + "='" + serviceList.getUID() + "'", null) == 0) {
+        if (db.update(SERVICE_LISTS_TABLE, values, ServiceList.DB_COLUMN_UID + "='" + serviceList.getUID() + "'", null) == 0) {
             db.insert(SERVICE_LISTS_TABLE, null, values);
             Log.d(TAG, "Adding service list " + serviceList.getUID());
         }
@@ -293,33 +243,26 @@ public class DatabaseHandler extends SQLiteOpenHelper {
         if (!uids.isEmpty()) {
             uids = uids.substring(1); // remove leading comma
             Log.i(TAG, "Deleting service and instances with UIDs not in " + uids);
-            db.delete(SERVICES_TABLE, SERVICES_COLUMN_UNIQUE_IDENTIFIER + " NOT IN (" + uids + ")", null);
-            db.delete(SERVICE_INSTANCES_TABLE, SERVICE_INSTANCES_COLUMN_SERVICE_UID + " NOT IN (" + uids + ")", null);
-            db.delete(SERVICE_NAMES_TABLE, SERVICE_NAMES_COLUMN_SERVICE_UID + " NOT IN (" + uids + ")", null);
-            db.delete(PROGRAMMES_TABLE, PROGRAMMES_COLUMN_FOREIGN_KEY + " NOT IN (" + uids + ")", null);
+            db.delete(SERVICES_TABLE, Service.DB_COLUMN_UNIQUE_IDENTIFIER + " NOT IN (" + uids + ")", null);
+            db.delete(SERVICE_INSTANCES_TABLE, COLUMN_FOREIGN_KEY + " NOT IN (" + uids + ")", null);
+            db.delete(SERVICE_NAMES_TABLE, COLUMN_FOREIGN_KEY + " NOT IN (" + uids + ")", null);
+            db.delete(PROGRAMMES_TABLE, COLUMN_FOREIGN_KEY + " NOT IN (" + uids + ")", null);
             // TODO: delete related materials for non-existent services/instances
         }
         if (!cgsids.isEmpty()) {
             cgsids = cgsids.substring(1); // remove leading comma
             Log.i(TAG, "Deleting content guides with CGSIDs not in " + cgsids);
-            db.delete(CONTENT_GUIDES_TABLE, CONTENT_GUIDES_COLUMN_CGSID + " NOT IN (" + cgsids + ")", null);
+            db.delete(CONTENT_GUIDES_TABLE, ContentGuide.DB_COLUMN_CGSID + " NOT IN (" + cgsids + ")", null);
         }
     }
 
     public synchronized void updateProgrammesForService(String serviceUID, List<Programme> programmes) {
         SQLiteDatabase db = getWritableDatabase();
-        db.delete(PROGRAMMES_TABLE, PROGRAMMES_COLUMN_FOREIGN_KEY
+        db.delete(PROGRAMMES_TABLE, COLUMN_FOREIGN_KEY
                 + "='" + serviceUID + "'", null);
         for (Programme programme : programmes) {
-            ContentValues values = new ContentValues();
-            values.put(PROGRAMMES_COLUMN_FOREIGN_KEY, serviceUID);
-            values.put(PROGRAMMES_COLUMN_TITLE, programme.getTitle());
-            values.put(PROGRAMMES_COLUMN_SHORT_DESCRIPTION, programme.getShortDescription());
-            values.put(PROGRAMMES_COLUMN_MEDIUM_DESCRIPTION, programme.getMediumDescription());
-            values.put(PROGRAMMES_COLUMN_LONG_DESCRIPTION, programme.getLongDescription());
-            values.put(PROGRAMMES_COLUMN_PARENTAL_RATING, programme.getParentalRating());
-            values.put(PROGRAMMES_COLUMN_START_TIME, programme.getStartTime());
-            values.put(PROGRAMMES_COLUMN_END_TIME, programme.getEndTime());
+            ContentValues values = programme.toContentValues();
+            values.put(COLUMN_FOREIGN_KEY, serviceUID);
             db.insert(PROGRAMMES_TABLE, null, values);
             Log.d(TAG, "Updated program: " + programme.getTitle());
         }
@@ -328,9 +271,9 @@ public class DatabaseHandler extends SQLiteOpenHelper {
     public synchronized List<Programme> getProgrammesForService(String serviceUID, long startTime, long endTime, Integer limit) {
         SQLiteDatabase db = getReadableDatabase();
         ArrayList<Programme> programmes = new ArrayList<>();
-        String[] projection = { PROGRAMMES_COLUMN_TITLE, PROGRAMMES_COLUMN_SHORT_DESCRIPTION, PROGRAMMES_COLUMN_MEDIUM_DESCRIPTION,
-                PROGRAMMES_COLUMN_LONG_DESCRIPTION, PROGRAMMES_COLUMN_PARENTAL_RATING, PROGRAMMES_COLUMN_START_TIME,
-                PROGRAMMES_COLUMN_END_TIME };
+        String[] projection = { Programme.DB_COLUMN_TITLE, Programme.DB_COLUMN_SHORT_DESCRIPTION, Programme.DB_COLUMN_MEDIUM_DESCRIPTION,
+                Programme.DB_COLUMN_LONG_DESCRIPTION, Programme.DB_COLUMN_PARENTAL_RATING, Programme.DB_COLUMN_START_TIME,
+                Programme.DB_COLUMN_END_TIME };
         String start = String.valueOf(startTime);
         String end = String.valueOf(endTime);
         String[] selectionArgs = { serviceUID, start, start, end, end, start, end, limit.toString() };
@@ -338,11 +281,11 @@ public class DatabaseHandler extends SQLiteOpenHelper {
         try
         {
             cursor = db.query(PROGRAMMES_TABLE, projection,
-                    PROGRAMMES_COLUMN_FOREIGN_KEY + "= ? AND (((" +
-                            PROGRAMMES_COLUMN_START_TIME + " >= ? OR " + PROGRAMMES_COLUMN_END_TIME + " >= ?) AND (" +
-                            PROGRAMMES_COLUMN_START_TIME + " <= ? OR " + PROGRAMMES_COLUMN_END_TIME + " <= ?)) OR (" +
-                            PROGRAMMES_COLUMN_START_TIME + " <= ? AND " + PROGRAMMES_COLUMN_END_TIME + " >= ?)) ORDER BY " +
-                            PROGRAMMES_COLUMN_START_TIME + " LIMIT ?",
+                    COLUMN_FOREIGN_KEY + "= ? AND (((" +
+                            Programme.DB_COLUMN_START_TIME + " >= ? OR " + Programme.DB_COLUMN_END_TIME + " >= ?) AND (" +
+                            Programme.DB_COLUMN_START_TIME + " <= ? OR " + Programme.DB_COLUMN_END_TIME + " <= ?)) OR (" +
+                            Programme.DB_COLUMN_START_TIME + " <= ? AND " + Programme.DB_COLUMN_END_TIME + " >= ?)) ORDER BY " +
+                            Programme.DB_COLUMN_START_TIME + " LIMIT ?",
                     selectionArgs, null, null, null);
             if (cursor != null) {
                 Programme.Builder builder = new Programme.Builder();
@@ -371,15 +314,15 @@ public class DatabaseHandler extends SQLiteOpenHelper {
 
     private List<Service> getServices(SQLiteDatabase db, String listUID) {
         ArrayList<Service> ret = new ArrayList<>();
-        String[] projection = { SERVICES_COLUMN_PROVIDER, SERVICES_COLUMN_UNIQUE_IDENTIFIER,
-                SERVICES_COLUMN_LCN, SERVICES_COLUMN_ADDITIONAL_PARAMS, SERVICES_COLUMN_SERVICE_TYPE,
-                SERVICES_COLUMN_CONTENT_GUIDE_CGSID, SERVICES_COLUMN_PARENTAL_RATING,
-                SERVICES_COLUMN_CONTENT_GUIDE_SERVICE_REF
+        String[] projection = { Service.DB_COLUMN_PROVIDER, Service.DB_COLUMN_UNIQUE_IDENTIFIER,
+                Service.DB_COLUMN_LCN, Service.DB_COLUMN_ADDITIONAL_PARAMS, Service.DB_COLUMN_SERVICE_TYPE,
+                Service.DB_COLUMN_CONTENT_GUIDE_CGSID, Service.DB_COLUMN_PARENTAL_RATING,
+                Service.DB_COLUMN_CONTENT_GUIDE_SERVICE_REF
         };
         Cursor cursor = null;
         try
         {
-            cursor = db.query(SERVICES_TABLE, projection, SERVICES_COLUMN_FOREIGN_KEY + "='" + listUID + "'", null, null, null, null);
+            cursor = db.query(SERVICES_TABLE, projection, COLUMN_FOREIGN_KEY + "='" + listUID + "'", null, null, null, null);
             if (cursor != null)
             {
                 Service.Builder serviceBuilder = new Service.Builder();
@@ -419,12 +362,12 @@ public class DatabaseHandler extends SQLiteOpenHelper {
     private ContentGuide getContendGuideForCGSID(SQLiteDatabase db, String cgsid) {
         ContentGuide guide = null;
         if (cgsid != null) {
-            String[] projection = { CONTENT_GUIDES_COLUMN_SCHEDUTE_INFO_URI };
+            String[] projection = { ContentGuide.DB_COLUMN_SCHEDULE_INFO_URI };
             Cursor cursor = null;
             try
             {
                 cursor = db.query(CONTENT_GUIDES_TABLE, projection,
-                        CONTENT_GUIDES_COLUMN_CGSID + "='" + cgsid + "'",
+                        ContentGuide.DB_COLUMN_CGSID + "='" + cgsid + "'",
                         null, null, null, null);
                 if (cursor != null && cursor.moveToFirst()) {
                     guide = new ContentGuide.Builder()
@@ -447,26 +390,10 @@ public class DatabaseHandler extends SQLiteOpenHelper {
 
     private void updateService(SQLiteDatabase db, String listUID, Service service) {
         String uid = service.getUniqueIdentifier();
-        ContentValues values = new ContentValues();
-        JSONObject params = new JSONObject();
-        values.put(SERVICES_COLUMN_FOREIGN_KEY, listUID);
-        values.put(SERVICES_COLUMN_PROVIDER, service.getProviderName());
-        values.put(SERVICES_COLUMN_UNIQUE_IDENTIFIER, uid);
-        values.put(SERVICES_COLUMN_LCN, service.getLCNNumber());
-        values.put(SERVICES_COLUMN_SERVICE_TYPE, service.getServiceType());
-        values.put(SERVICES_COLUMN_CONTENT_GUIDE_CGSID, (service.getContentGuide() == null ? null : service.getContentGuide().getCGSID()));
-        values.put(SERVICES_COLUMN_CONTENT_GUIDE_SERVICE_REF, service.getContentGuideServiceRef());
-        if (service.getTriplet() != null) {
-            try {
-                params.put("hbbtv-i:DVBTriplet", service.getTriplet());
-            } catch (JSONException e) {
-                e.printStackTrace();
-            }
-        }
-        values.put(SERVICES_COLUMN_ADDITIONAL_PARAMS, params.toString().getBytes(StandardCharsets.UTF_8));
-
-        if (db.update(SERVICES_TABLE, values, SERVICES_COLUMN_UNIQUE_IDENTIFIER + "='" +
-                uid + "' AND " + SERVICES_COLUMN_FOREIGN_KEY + "='" + listUID + "'", null) == 0) {
+        ContentValues values = service.toContentValues();
+        values.put(COLUMN_FOREIGN_KEY, listUID);
+        if (db.update(SERVICES_TABLE, values, Service.DB_COLUMN_UNIQUE_IDENTIFIER + "='" +
+                uid + "' AND " + COLUMN_FOREIGN_KEY + "='" + listUID + "'", null) == 0) {
             db.insert(SERVICES_TABLE, null, values);
             Log.d(TAG, "Adding service " + uid);
         }
@@ -483,25 +410,13 @@ public class DatabaseHandler extends SQLiteOpenHelper {
     private void updateServiceInstances(SQLiteDatabase db, String uid, List<ServiceInstance> instances) {
         for (int i = 0; i < instances.size(); ++i) {
             ServiceInstance instance = instances.get(i);
-            JSONObject params = new JSONObject();
-            ContentValues values = new ContentValues();
-            values.put(SERVICE_INSTANCES_COLUMN_SERVICE_UID, uid);
-            values.put(SERVICE_INSTANCES_COLUMN_PRIORITY, instance.getPriority());
-            values.put(SERVICE_INSTANCES_COLUMN_INDEX, i);
-            values.put(SERVICE_INSTANCES_COLUMN_DELIVERY_TYPE, instance.getDeliveryType());
-            for (Map.Entry<String,String> entry : instance.getDeliveryParameters().entrySet()) {
-                try {
-                    params.put(entry.getKey(), entry.getValue());
-                }
-                catch (JSONException e) {
-                    e.printStackTrace();
-                }
-            }
-            values.put(SERVICE_INSTANCES_COLUMN_DELIVERY_PARAMS, params.toString().getBytes(StandardCharsets.UTF_8));
+            ContentValues values = instance.toContentValues();
+            values.put(COLUMN_FOREIGN_KEY, uid);
+            values.put(COLUMN_INDEX, i);
             // in case there are more services than before, insert them
             if (db.update(SERVICE_INSTANCES_TABLE, values,
-                    SERVICE_INSTANCES_COLUMN_SERVICE_UID + "='" + uid + "' AND "
-                            + SERVICE_INSTANCES_COLUMN_INDEX + "=" + i, null) == 0) {
+                    COLUMN_FOREIGN_KEY + "='" + uid + "' AND "
+                            + COLUMN_INDEX + "=" + i, null) == 0) {
                 db.insert(SERVICE_INSTANCES_TABLE, null, values);
             }
             updateServiceNames(db, uid + "_" + i, instance.getDisplayNames());
@@ -515,17 +430,15 @@ public class DatabaseHandler extends SQLiteOpenHelper {
 
         // in case there are less service instances than before, delete those that have
         // higher index than the size of the current list
-        db.delete(SERVICE_INSTANCES_TABLE, SERVICE_INSTANCES_COLUMN_SERVICE_UID
-                + "='" + uid + "' AND " + SERVICE_INSTANCES_COLUMN_INDEX + ">="
+        db.delete(SERVICE_INSTANCES_TABLE, COLUMN_FOREIGN_KEY
+                + "='" + uid + "' AND " + COLUMN_INDEX + ">="
                 + instances.size(), null);
     }
 
     private void updateContentGuide(SQLiteDatabase db, ContentGuide guide) {
         if (guide != null) {
-            ContentValues values = new ContentValues();
-            values.put(CONTENT_GUIDES_COLUMN_CGSID, guide.getCGSID());
-            values.put(CONTENT_GUIDES_COLUMN_SCHEDUTE_INFO_URI, guide.getScheduleInfoEndpointURI());
-            if (db.update(CONTENT_GUIDES_TABLE, values, CONTENT_GUIDES_COLUMN_CGSID
+            ContentValues values = guide.toContentValues();
+            if (db.update(CONTENT_GUIDES_TABLE, values, ContentGuide.DB_COLUMN_CGSID
                     + "='" + guide.getCGSID() + "'", null) == 0) {
                 db.insert(CONTENT_GUIDES_TABLE, null, values);
             }
@@ -535,77 +448,69 @@ public class DatabaseHandler extends SQLiteOpenHelper {
     private void updateRelatedMaterials(SQLiteDatabase db, String foreignKey, List<RelatedMaterial> materials) {
         for (int i = 0; i < materials.size(); ++i) {
             RelatedMaterial material = materials.get(i);
-            ContentValues values = new ContentValues();
-            values.put(RELATED_MATERIALS_COLUMN_FOREIGN_KEY, foreignKey);
-            values.put(RELATED_MATERIALS_COLUMN_INDEX, i);
-            values.put(RELATED_MATERIALS_COLUMN_HOW_RELATED_HREF, material.getHowRelatedHref());
-            values.put(RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_URI, material.getMediaLocatorUri());
-            values.put(RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE, material.getMediaLocatorContentType());
-            if (db.update(RELATED_MATERIALS_TABLE, values, RELATED_MATERIALS_COLUMN_FOREIGN_KEY
-                    + "='" + foreignKey + "' AND " + RELATED_MATERIALS_COLUMN_INDEX
+            ContentValues values = material.toContentValues();
+            values.put(COLUMN_FOREIGN_KEY, foreignKey);
+            values.put(COLUMN_INDEX, i);
+            if (db.update(RELATED_MATERIALS_TABLE, values, COLUMN_FOREIGN_KEY
+                    + "='" + foreignKey + "' AND " + COLUMN_INDEX
                     + "=" + i, null) == 0) {
                 db.insert(RELATED_MATERIALS_TABLE, null, values);
             }
         }
         // in case there are less related materials than before, delete those that have
         // higher index than the size of the current list
-        db.delete(RELATED_MATERIALS_TABLE, RELATED_MATERIALS_COLUMN_FOREIGN_KEY
-                + "='" + foreignKey + "' AND " + RELATED_MATERIALS_COLUMN_INDEX
+        db.delete(RELATED_MATERIALS_TABLE, COLUMN_FOREIGN_KEY
+                + "='" + foreignKey + "' AND " + COLUMN_INDEX
                 + ">=" + materials.size(), null);
     }
 
     private void updateAvailabilityPeriods(SQLiteDatabase db, String foreignKey, List<AvailabilityPeriod> availabilityPeriods) {
         for (int i = 0; i < availabilityPeriods.size(); i++) {
-            ContentValues values = new ContentValues();
             AvailabilityPeriod period = availabilityPeriods.get(i);
-            values.put(AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY, foreignKey);
-            values.put(AVAILABILITY_PERIOD_COLUMN_VALID_FROM, period.getValidFrom());
-            values.put(AVAILABILITY_PERIOD_COLUMN_VALID_TO, period.getValidTo());
-            values.put(AVAILABILITY_PERIOD_COLUMN_INDEX, i);
-            if (db.update(AVAILABILITY_PERIOD_TABLE, values, AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY
-                    + "='" + foreignKey + "' AND " + AVAILABILITY_PERIOD_COLUMN_INDEX + "=" + i, null) == 0) {
+            ContentValues values = period.toContentValues();
+            values.put(COLUMN_FOREIGN_KEY, foreignKey);
+            values.put(COLUMN_INDEX, i);
+            if (db.update(AVAILABILITY_PERIOD_TABLE, values, COLUMN_FOREIGN_KEY
+                    + "='" + foreignKey + "' AND " + COLUMN_INDEX + "=" + i, null) == 0) {
                 db.insert(AVAILABILITY_PERIOD_TABLE, null, values);
             }
             updateAvailabilityPeriodIntervals(db, foreignKey + "_" + i, period.getIntervals());
         }
         // in case there are less availability periods than before, delete those that have
         // higher index than the size of the current list
-        db.delete(AVAILABILITY_PERIOD_TABLE, AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY
-                + "='" + foreignKey + "' AND " + AVAILABILITY_PERIOD_COLUMN_INDEX
+        db.delete(AVAILABILITY_PERIOD_TABLE, COLUMN_FOREIGN_KEY
+                + "='" + foreignKey + "' AND " + COLUMN_INDEX
                 + ">=" + availabilityPeriods.size(), null);
     }
 
     private void updateAvailabilityPeriodIntervals(SQLiteDatabase db, String foreignKey, List<AvailabilityPeriod.Interval> intervals) {
         for (int i = 0; i < intervals.size(); i++) {
-            ContentValues values = new ContentValues();
-            values.put(AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY, foreignKey);
-            values.put(AVAILABILITY_PERIOD_INTERVALS_COLUMN_START_TIME, intervals.get(i).getStartTime());
-            values.put(AVAILABILITY_PERIOD_INTERVALS_COLUMN_END_TIME, intervals.get(i).getEndTime());
-            values.put(AVAILABILITY_PERIOD_INTERVALS_COLUMN_DAYS, intervals.get(i).getDays());
-            values.put(AVAILABILITY_PERIOD_INTERVALS_COLUMN_INDEX, i);
-            if (db.update(AVAILABILITY_PERIOD_INTERVALS_TABLE, values, AVAILABILITY_PERIOD_INTERVALS_COLUMN_FOREIGN_KEY
-                    + "='" + foreignKey + "' AND " + AVAILABILITY_PERIOD_INTERVALS_COLUMN_INDEX
+            ContentValues values = intervals.get(i).toContentValues();
+            values.put(COLUMN_FOREIGN_KEY, foreignKey);
+            values.put(COLUMN_INDEX, i);
+            if (db.update(AVAILABILITY_PERIOD_INTERVALS_TABLE, values, COLUMN_FOREIGN_KEY
+                    + "='" + foreignKey + "' AND " + COLUMN_INDEX
                     + "=" + i, null) == 0) {
                 db.insert(AVAILABILITY_PERIOD_INTERVALS_TABLE, null, values);
             }
         }
         // in case there are less availability period intervals than before, delete those that have
         // higher index than the size of the current list
-        db.delete(AVAILABILITY_PERIOD_INTERVALS_TABLE, AVAILABILITY_PERIOD_INTERVALS_COLUMN_FOREIGN_KEY
-                + "='" + foreignKey + "' AND " + AVAILABILITY_PERIOD_INTERVALS_COLUMN_INDEX
+        db.delete(AVAILABILITY_PERIOD_INTERVALS_TABLE, COLUMN_FOREIGN_KEY
+                + "='" + foreignKey + "' AND " + COLUMN_INDEX
                 + ">=" + intervals.size(), null);
     }
 
     private List<RelatedMaterial> getRelatedMaterials(SQLiteDatabase db, String foreignKey) {
         ArrayList<RelatedMaterial> materials = new ArrayList<>();
-        String[] projection = { RELATED_MATERIALS_COLUMN_HOW_RELATED_HREF,
-                RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_URI, RELATED_MATERIALS_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE };
+        String[] projection = { RelatedMaterial.DB_COLUMN_HOW_RELATED_HREF,
+                RelatedMaterial.DB_COLUMN_MEDIA_LOCATOR_URI, RelatedMaterial.DB_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE };
         Cursor cursor = null;
         try
         {
             cursor = db.query(RELATED_MATERIALS_TABLE, projection,
-                    RELATED_MATERIALS_COLUMN_FOREIGN_KEY + "='" + foreignKey + "'",
-                    null, null, null, RELATED_MATERIALS_COLUMN_INDEX);
+                    COLUMN_FOREIGN_KEY + "='" + foreignKey + "'",
+                    null, null, null, COLUMN_INDEX);
             if (cursor != null) {
                 RelatedMaterial.Builder relMatBuilder = new RelatedMaterial.Builder();
                 while (cursor.moveToNext()) {
@@ -628,13 +533,13 @@ public class DatabaseHandler extends SQLiteOpenHelper {
     }
 
     private List<AvailabilityPeriod> getAvailabilityPeriods(SQLiteDatabase db, String foreignKey) {
-        String[] projection = { AVAILABILITY_PERIOD_COLUMN_VALID_FROM, AVAILABILITY_PERIOD_COLUMN_VALID_TO, AVAILABILITY_PERIOD_COLUMN_INDEX };
+        String[] projection = { AvailabilityPeriod.DB_COLUMN_VALID_FROM, AvailabilityPeriod.DB_COLUMN_VALID_TO, COLUMN_INDEX };
         ArrayList<AvailabilityPeriod> periods = new ArrayList<>();
         Cursor cursor = null;
         try {
             cursor = db.query(AVAILABILITY_PERIOD_TABLE, projection,
-                    AVAILABILITY_PERIOD_COLUMN_FOREIGN_KEY + "='" + foreignKey + "'",
-                    null, null, null, AVAILABILITY_PERIOD_COLUMN_INDEX);
+                    COLUMN_FOREIGN_KEY + "='" + foreignKey + "'",
+                    null, null, null, COLUMN_INDEX);
             if (cursor != null) {
                 while(cursor.moveToNext()) {
                     periods.add(new AvailabilityPeriod.Builder()
@@ -654,12 +559,12 @@ public class DatabaseHandler extends SQLiteOpenHelper {
 
     private List<AvailabilityPeriod.Interval> getAvailabilityPeriodIntervals(SQLiteDatabase db, String foreignKey) {
         List<AvailabilityPeriod.Interval> intervals = new ArrayList<>();
-        String[] projection = { AVAILABILITY_PERIOD_INTERVALS_COLUMN_START_TIME, AVAILABILITY_PERIOD_INTERVALS_COLUMN_END_TIME, AVAILABILITY_PERIOD_INTERVALS_COLUMN_DAYS };
+        String[] projection = { AvailabilityPeriod.Interval.DB_COLUMN_START_TIME, AvailabilityPeriod.Interval.DB_COLUMN_END_TIME, AvailabilityPeriod.Interval.DB_COLUMN_DAYS };
         Cursor cursor = null;
         try {
             cursor = db.query(AVAILABILITY_PERIOD_INTERVALS_TABLE, projection,
-                    AVAILABILITY_PERIOD_INTERVALS_COLUMN_FOREIGN_KEY + "='" + foreignKey + "'",
-                    null, null, null, AVAILABILITY_PERIOD_INTERVALS_COLUMN_INDEX);
+                    COLUMN_FOREIGN_KEY + "='" + foreignKey + "'",
+                    null, null, null, COLUMN_INDEX);
             if (cursor != null) {
                 while (cursor.moveToNext()) {
                     intervals.add(new AvailabilityPeriod.Interval.Builder()
@@ -679,14 +584,14 @@ public class DatabaseHandler extends SQLiteOpenHelper {
 
     private List<ServiceInstance> getServiceInstancesForUID(SQLiteDatabase db, String uid) {
         ArrayList<ServiceInstance> instances = new ArrayList<>();
-        String[] projection = { SERVICE_INSTANCES_COLUMN_DELIVERY_PARAMS, SERVICE_INSTANCES_COLUMN_PRIORITY,
-                SERVICE_INSTANCES_COLUMN_INDEX, SERVICE_INSTANCES_COLUMN_DELIVERY_TYPE };
+        String[] projection = { ServiceInstance.DB_COLUMN_DELIVERY_PARAMS, ServiceInstance.DB_COLUMN_PRIORITY,
+                COLUMN_INDEX, ServiceInstance.DB_COLUMN_DELIVERY_TYPE };
         Cursor cursor = null;
         try
         {
             cursor = db.query(SERVICE_INSTANCES_TABLE, projection,
-                    SERVICE_INSTANCES_COLUMN_SERVICE_UID + "='" + uid + "'",
-                    null, null, null, SERVICE_INSTANCES_COLUMN_INDEX);
+                    COLUMN_FOREIGN_KEY + "='" + uid + "'",
+                    null, null, null, COLUMN_INDEX);
             if (cursor != null)
             {
                 ServiceInstance.Builder instanceBuilder = new ServiceInstance.Builder();
@@ -720,10 +625,10 @@ public class DatabaseHandler extends SQLiteOpenHelper {
     }
 
     private void updateServiceNames(SQLiteDatabase db, String uid, Map<String, String> names) {
-        db.delete(SERVICE_NAMES_TABLE, SERVICE_NAMES_COLUMN_SERVICE_UID + " = '" + uid + "'", null);
+        db.delete(SERVICE_NAMES_TABLE, COLUMN_FOREIGN_KEY + " = '" + uid + "'", null);
         for (Map.Entry<String, String> entry : names.entrySet()) {
             ContentValues values = new ContentValues();
-            values.put(SERVICE_NAMES_COLUMN_SERVICE_UID, uid);
+            values.put(COLUMN_FOREIGN_KEY, uid);
             values.put(SERVICE_NAMES_COLUMN_COUNTRY, entry.getKey());
             values.put(SERVICE_NAMES_COLUMN_NAME, entry.getValue());
             db.insert(SERVICE_NAMES_TABLE, null, values);
@@ -737,7 +642,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
         try
         {
             cursor = db.query(SERVICE_NAMES_TABLE, projection,
-                    SERVICE_NAMES_COLUMN_SERVICE_UID + "='" + uid + "'",
+                    COLUMN_FOREIGN_KEY + "='" + uid + "'",
                     null, null, null, null);
             if (cursor != null)
             {

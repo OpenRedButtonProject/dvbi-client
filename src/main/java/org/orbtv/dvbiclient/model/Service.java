@@ -1,16 +1,28 @@
 package org.orbtv.dvbiclient.model;
 
+import android.content.ContentValues;
 import android.util.Log;
 
+import org.json.JSONException;
+import org.json.JSONObject;
 import org.xmlpull.v1.XmlPullParser;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 public class Service implements IService {
-    private static final String TAG = Service.class.getSimpleName();
+    public static final String DB_COLUMN_UNIQUE_IDENTIFIER = "unique_identifier";
+    public static final String DB_COLUMN_LCN = "lcn";
+    public static final String DB_COLUMN_PROVIDER = "provider";
+    public static final String DB_COLUMN_ADDITIONAL_PARAMS = "additional_params";
+    public static final String DB_COLUMN_SERVICE_TYPE = "service_type";
+    public static final String DB_COLUMN_CONTENT_GUIDE_CGSID = "guide_cgsid";
+    public static final String DB_COLUMN_PARENTAL_RATING = "parental_rating";
+    public static final String DB_COLUMN_CONTENT_GUIDE_SERVICE_REF = "content_guide_service_ref";
+    public static final String TAG = Service.class.getSimpleName();
     private String mUniqueIdentifier;
     private String mProviderName;
     private String mServiceType;
@@ -84,6 +96,26 @@ public class Service implements IService {
             ret += "\n" + mContentGuideSource.toString();
         }
         return ret;
+    }
+
+    public ContentValues toContentValues() {
+        ContentValues values = new ContentValues();
+        JSONObject params = new JSONObject();
+        values.put(Service.DB_COLUMN_PROVIDER, mProviderName);
+        values.put(Service.DB_COLUMN_UNIQUE_IDENTIFIER, mUniqueIdentifier);
+        values.put(Service.DB_COLUMN_LCN, mLcnNumber);
+        values.put(Service.DB_COLUMN_SERVICE_TYPE, mServiceType);
+        values.put(Service.DB_COLUMN_CONTENT_GUIDE_CGSID, (mContentGuideSource == null ? null : mContentGuideSource.getCGSID()));
+        values.put(Service.DB_COLUMN_CONTENT_GUIDE_SERVICE_REF, mContentGuideServiceRef);
+        if (mTriplet != null) {
+            try {
+                params.put("hbbtv-i:DVBTriplet", mTriplet);
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+        }
+        values.put(Service.DB_COLUMN_ADDITIONAL_PARAMS, params.toString().getBytes(StandardCharsets.UTF_8));
+        return values;
     }
 
     public static List<Service> parseFromXML(XmlPullParser xpp) throws Exception {

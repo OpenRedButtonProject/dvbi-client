@@ -1,5 +1,6 @@
 package org.orbtv.dvbiclient.model;
 
+import android.content.ContentValues;
 import android.net.Uri;
 import android.util.Log;
 
@@ -18,6 +19,8 @@ import java.io.InputStreamReader;
 import java.io.BufferedReader;
 
 public class ContentGuide {
+    public static final String DB_COLUMN_CGSID = "cgsid";
+    public static final String DB_COLUMN_SCHEDULE_INFO_URI = "schedule_info_uri";
     private String mProviderName;
     private String mCGSID;
     private String mScheduleInfoEndpointURI;
@@ -37,6 +40,13 @@ public class ContentGuide {
                 ", scheduleInfoEndpointURI='" + mScheduleInfoEndpointURI + '\'' +
                 ", ProgramInfoEndpointURI='" + mProgramInfoEndpointURI + '\'' +
                 '}';
+    }
+
+    public ContentValues toContentValues() {
+        ContentValues values = new ContentValues();
+        values.put(ContentGuide.DB_COLUMN_CGSID, mCGSID);
+        values.put(ContentGuide.DB_COLUMN_SCHEDULE_INFO_URI, mScheduleInfoEndpointURI);
+        return values;
     }
 
     public static List<ContentGuide> parseSourceFromXML(XmlPullParser xpp) throws Exception {

@@ -1,6 +1,15 @@
 package org.orbtv.dvbiclient.model;
 
+import android.content.ContentValues;
+
 public class Programme {
+    public static final String DB_COLUMN_TITLE = "title";
+    public static final String DB_COLUMN_SHORT_DESCRIPTION = "short_description";
+    public static final String DB_COLUMN_MEDIUM_DESCRIPTION = "medium_description";
+    public static final String DB_COLUMN_LONG_DESCRIPTION = "long_description";
+    public static final String DB_COLUMN_START_TIME = "start_time";
+    public static final String DB_COLUMN_END_TIME = "end_time";
+    public static final String DB_COLUMN_PARENTAL_RATING = "parental_rating";
     private int mParentalRating;
     private String mTitle;
     private String mShortDescription;
@@ -28,6 +37,18 @@ public class Programme {
                 + "\n  Start time: " + mStartTime
                 + "\n  End Time: " + mEndTime
                 + "\n  Parental rating: " + mParentalRating;
+    }
+
+    public ContentValues toContentValues() {
+        ContentValues values = new ContentValues();
+        values.put(Programme.DB_COLUMN_TITLE, mTitle);
+        values.put(Programme.DB_COLUMN_SHORT_DESCRIPTION, mShortDescription);
+        values.put(Programme.DB_COLUMN_MEDIUM_DESCRIPTION, mMediumDescription);
+        values.put(Programme.DB_COLUMN_LONG_DESCRIPTION, mLongDescription);
+        values.put(Programme.DB_COLUMN_PARENTAL_RATING, mParentalRating);
+        values.put(Programme.DB_COLUMN_START_TIME, mStartTime);
+        values.put(Programme.DB_COLUMN_END_TIME, mEndTime);
+        return values;
     }
 
     public static class Builder {

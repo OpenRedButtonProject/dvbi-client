@@ -1,5 +1,7 @@
 package org.orbtv.dvbiclient.model;
 
+import android.content.ContentValues;
+
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserFactory;
 
@@ -8,6 +10,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ServiceList {
+    public static final String DB_COLUMN_NAME = "name";
+    public static final String DB_COLUMN_PROVIDER = "provider";
+    public static final String DB_COLUMN_UID = "uid";
     private String mUID;
     private List<Service> mServices;
     private List<LCNTable> mLCNTables = new ArrayList<>();
@@ -23,6 +28,14 @@ public class ServiceList {
 
     public String getUID() {
         return mUID;
+    }
+
+    public ContentValues toContentValues() {
+        ContentValues values = new ContentValues();
+        values.put(ServiceList.DB_COLUMN_UID, mUID);
+        values.put(ServiceList.DB_COLUMN_NAME, "myname");
+        values.put(ServiceList.DB_COLUMN_PROVIDER, "myprovider");
+        return values;
     }
 
     public List<ContentGuide> getContentGuideSources() { return new ArrayList<>(mContentGuideSources); }

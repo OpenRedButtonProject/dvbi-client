@@ -1,13 +1,21 @@
 package org.orbtv.dvbiclient.model;
 
+import android.content.ContentValues;
+
+import org.json.JSONException;
+import org.json.JSONObject;
 import org.xmlpull.v1.XmlPullParser;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 public class ServiceInstance implements IService {
+    public static final String DB_COLUMN_PRIORITY = "priority";
+    public static final String DB_COLUMN_DELIVERY_PARAMS = "delivery_params";
+    public static final String DB_COLUMN_DELIVERY_TYPE = "delivery_type";
     private Map<String, String> mDisplayNames = new HashMap<>();
     private String mServiceName;
     private int mPriority;
@@ -67,6 +75,23 @@ public class ServiceInstance implements IService {
             ret += "\n" + mat.toString();
         }
         return ret;
+    }
+
+    public ContentValues toContentValues() {
+        JSONObject params = new JSONObject();
+        ContentValues values = new ContentValues();
+        values.put(ServiceInstance.DB_COLUMN_PRIORITY, mPriority);
+        values.put(ServiceInstance.DB_COLUMN_DELIVERY_TYPE, mDeliveryType);
+        for (Map.Entry<String,String> entry : mDeliveryParameters.entrySet()) {
+            try {
+                params.put(entry.getKey(), entry.getValue());
+            }
+            catch (JSONException e) {
+                e.printStackTrace();
+            }
+        }
+        values.put(ServiceInstance.DB_COLUMN_DELIVERY_PARAMS, params.toString().getBytes(StandardCharsets.UTF_8));
+        return values;
     }
 
     public static ServiceInstance parseFromXML(XmlPullParser xpp) throws Exception {

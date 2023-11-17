@@ -3,11 +3,15 @@ package org.orbtv.dvbiclient.model;
 import static org.orbtv.dvbiclient.Utils.getSecondsFromDate;
 import static org.orbtv.dvbiclient.Utils.getSecondsFromTime;
 
+import android.content.ContentValues;
+
 import org.xmlpull.v1.XmlPullParser;
 import java.util.ArrayList;
 import java.util.List;
 
 public final class AvailabilityPeriod {
+    public static final String DB_COLUMN_VALID_FROM = "valid_from";
+    public static final String DB_COLUMN_VALID_TO = "valid_to";
     private List<Interval> mIntervals = new ArrayList<>();
     private Long mValidFrom;
     private Long mValidTo;
@@ -26,6 +30,13 @@ public final class AvailabilityPeriod {
             builder.append("\n" + interval.toString());
         }
         return builder.toString();
+    }
+
+    public ContentValues toContentValues() {
+        ContentValues values = new ContentValues();
+        values.put(AvailabilityPeriod.DB_COLUMN_VALID_FROM, mValidFrom);
+        values.put(AvailabilityPeriod.DB_COLUMN_VALID_TO, mValidTo);
+        return values;
     }
 
     public static List<AvailabilityPeriod> parseFromXML(XmlPullParser xpp) throws Exception {
@@ -60,6 +71,9 @@ public final class AvailabilityPeriod {
     }
 
     public static final class Interval {
+        public static final String DB_COLUMN_START_TIME = "start_time";
+        public static final String DB_COLUMN_END_TIME = "end_time";
+        public static final String DB_COLUMN_DAYS = "days";
         private Integer mStart;
         private Integer mEnd;
         private String mDays;
@@ -70,6 +84,14 @@ public final class AvailabilityPeriod {
         @Override
         public String toString() {
             return "- Interval -\nStart Time: " + mStart + ", End time: " + mEnd + ", Days: " + mDays;
+        }
+
+        public ContentValues toContentValues() {
+            ContentValues values = new ContentValues();
+            values.put(AvailabilityPeriod.Interval.DB_COLUMN_START_TIME, mStart);
+            values.put(AvailabilityPeriod.Interval.DB_COLUMN_END_TIME, mEnd);
+            values.put(AvailabilityPeriod.Interval.DB_COLUMN_DAYS, mDays);
+            return values;
         }
 
         public static final class Builder {

@@ -1,8 +1,13 @@
 package org.orbtv.dvbiclient.model;
 
+import android.content.ContentValues;
+
 import org.xmlpull.v1.XmlPullParser;
 
 public class RelatedMaterial {
+    public static final String DB_COLUMN_HOW_RELATED_HREF = "how_related_href";
+    public static final String DB_COLUMN_MEDIA_LOCATOR_URI = "media_locator_uri";
+    public static final String DB_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE = "media_locator_content_type";
     private String mHowRelatedHref;
     private String mMediaLocatorUri;
     private String mMediaLocatorContentType;
@@ -29,6 +34,14 @@ public class RelatedMaterial {
                 + "howRelatedHref: " + this.mHowRelatedHref + "\n"
                 + "mediaLocatorContentType: " + this.mMediaLocatorContentType + "\n"
                 + "mediaLocatorUri: " + this.mMediaLocatorUri;
+    }
+
+    public ContentValues toContentValues() {
+        ContentValues values = new ContentValues();
+        values.put(RelatedMaterial.DB_COLUMN_HOW_RELATED_HREF, mHowRelatedHref);
+        values.put(RelatedMaterial.DB_COLUMN_MEDIA_LOCATOR_URI, mMediaLocatorUri);
+        values.put(RelatedMaterial.DB_COLUMN_MEDIA_LOCATOR_CONTENT_TYPE, mMediaLocatorContentType);
+        return values;
     }
 
     public static RelatedMaterial parseFromXML(XmlPullParser xpp) throws Exception {
