@@ -18,6 +18,17 @@ public class Programme {
     public String getLongDescription() { return mLongDescription; }
     public long getStartTime() { return mStartTime; }
     public long getEndTime() { return mEndTime; }
+    @Override
+    public String toString() {
+        return "--- Programme ---"
+                + "\n  Title: " + mTitle
+                + "\n  Short desc: " + mShortDescription
+                + "\n  Medium desc: " + mMediumDescription
+                + "\n  Long desc: " + mLongDescription
+                + "\n  Start time: " + mStartTime
+                + "\n  End Time: " + mEndTime
+                + "\n  Parental rating: " + mParentalRating;
+    }
 
     public static class Builder {
         private Programme mInstance;

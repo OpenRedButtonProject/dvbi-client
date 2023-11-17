@@ -128,7 +128,7 @@ public class EpgManager {
                     long currentTimestamp = System.currentTimeMillis() / 1000;
                     for (Map.Entry<String, MutableLong> entry : mRequestTimes.entrySet()) {
                         if (entry.getValue().get() != null && entry.getValue().get() <= currentTimestamp) {
-                            Log.i(TAG, "Updating EPG...");
+                            Log.i(TAG, "Updating EPG for Service " + entry.getKey());
                             entry.getValue().set(null);
                             Uri.Builder builder = mScheduleUris.get(entry.getKey()).buildUpon();
                             long startTime = (currentTimestamp - EPG_INTERVAL) - currentTimestamp % EPG_INTERVAL;

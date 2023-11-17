@@ -69,6 +69,18 @@ public class DvbIClient {
         put(TvTrackInfo.TYPE_VIDEO, "video");
         put(TvTrackInfo.TYPE_SUBTITLE, "text");
     }};
+    private final ITvInputCallback mFallbackCallback = new ITvInputCallback() {
+        @Override
+        public int getParentalControlAge() { return 0; }
+        @Override
+        public void tuneBroadcast(String uri) { }
+        @Override
+        public void tuneOffBroadcast() { }
+        @Override
+        public void notifyVideoAvailable() { }
+        @Override
+        public void notifyVideoUnavailable(int reason) { }
+    };
 
     private final DvbIView mDvbIView;
     private final HashMap<Integer, String> mStreamEventsLookup = new HashMap<>();
@@ -82,7 +94,7 @@ public class DvbIClient {
     private HashMap<Integer, TvTrackInfo> mSelectedTracks = new HashMap<>(); // TODO: should it be part of TunedServiceManager?
     private boolean mSubtitlesEnabled = false;
     private HashMap<Integer, Boolean> mIsUnselected = new HashMap<>();
-    private final ITvInputCallback mTvInputCallback;
+    private ITvInputCallback mTvInputCallback;
     private final EpgManager mEpgManager;
 
     private final TunedServiceManager mServiceManager = new TunedServiceManager(new TunedServiceManager.Callback() {
@@ -370,9 +382,8 @@ public class DvbIClient {
         }
     };
 
-    private DvbIClient(ITvInputCallback callback) {
-        Context context = callback.getContext();
-        mTvInputCallback = callback;
+    private DvbIClient(Context context) {
+        mTvInputCallback = mFallbackCallback;
         mDbHandler = new DatabaseHandler(context);
         mDvbIView = new DvbIView(context);
         mDvbIView.addJSCallback(mJSCallback);
@@ -394,9 +405,18 @@ public class DvbIClient {
         });
     }
 
-    public static void instantiate(ITvInputCallback callback) {
+    public void setTvInputCallback(ITvInputCallback callback) {
+        if (callback == null) {
+            mTvInputCallback = mFallbackCallback;
+        }
+        else {
+            mTvInputCallback = callback;
+        }
+    }
+
+    public static void instantiate(Context context) {
         if (mSingleton == null) {
-            mSingleton = new DvbIClient(callback);
+            mSingleton = new DvbIClient(context);
         }
     }
 
@@ -660,6 +680,7 @@ public class DvbIClient {
                 } catch (InternalProviderData.ParseException e) {
                     e.printStackTrace();
                 }
+                Log.i(TAG, programme.toString());
                 events.add(new Program.Builder()
                         .setChannelId(channel.getId())
                         .setTitle(programme.getTitle())
@@ -672,6 +693,7 @@ public class DvbIClient {
                         .build());
             }
         }
+        Log.i(TAG, "Retrieved " + events.size() + " programs for service " + uid + " with id " + channel.getId() + " in the range of " + start + " and " + end);
         return events;
     }
 
