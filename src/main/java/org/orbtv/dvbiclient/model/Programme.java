@@ -4,6 +4,7 @@ import android.content.ContentValues;
 
 public class Programme {
     public static final String DB_COLUMN_TITLE = "title";
+    public static final String DB_COLUMN_PROGRAM_ID = "program_id";
     public static final String DB_COLUMN_SHORT_DESCRIPTION = "short_description";
     public static final String DB_COLUMN_MEDIUM_DESCRIPTION = "medium_description";
     public static final String DB_COLUMN_LONG_DESCRIPTION = "long_description";
@@ -11,6 +12,7 @@ public class Programme {
     public static final String DB_COLUMN_END_TIME = "end_time";
     public static final String DB_COLUMN_PARENTAL_RATING = "parental_rating";
     private int mParentalRating;
+    private String mProgramId;
     private String mTitle;
     private String mShortDescription;
     private String mMediumDescription;
@@ -27,10 +29,12 @@ public class Programme {
     public String getLongDescription() { return mLongDescription; }
     public long getStartTime() { return mStartTime; }
     public long getEndTime() { return mEndTime; }
+    public String getProgramId() { return mProgramId; }
     @Override
     public String toString() {
         return "--- Programme ---"
                 + "\n  Title: " + mTitle
+                + "\n  Program id: " + mProgramId
                 + "\n  Short desc: " + mShortDescription
                 + "\n  Medium desc: " + mMediumDescription
                 + "\n  Long desc: " + mLongDescription
@@ -42,6 +46,7 @@ public class Programme {
     public ContentValues toContentValues() {
         ContentValues values = new ContentValues();
         values.put(Programme.DB_COLUMN_TITLE, mTitle);
+        values.put(Programme.DB_COLUMN_PROGRAM_ID, mProgramId);
         values.put(Programme.DB_COLUMN_SHORT_DESCRIPTION, mShortDescription);
         values.put(Programme.DB_COLUMN_MEDIUM_DESCRIPTION, mMediumDescription);
         values.put(Programme.DB_COLUMN_LONG_DESCRIPTION, mLongDescription);
@@ -65,6 +70,11 @@ public class Programme {
 
         public Programme.Builder setTitle(String value) {
             mInstance.mTitle = value;
+            return this;
+        }
+
+        public Programme.Builder setProgramId(String value) {
+            mInstance.mProgramId = value;
             return this;
         }
 
@@ -97,6 +107,7 @@ public class Programme {
             Programme instance = new Programme();
             instance.mParentalRating = mInstance.mParentalRating;
             instance.mTitle = mInstance.mTitle;
+            instance.mProgramId = mInstance.mProgramId;
             instance.mShortDescription = mInstance.mShortDescription;
             instance.mMediumDescription = mInstance.mMediumDescription;
             instance.mLongDescription = mInstance.mLongDescription;

@@ -32,6 +32,8 @@ public class EpgManager {
     private final EpgRunnable mEpgRunnable;
     private final Thread mEpgThread;
     private final ArrayList<Callback> mCallbacks = new ArrayList<>();
+    private final ArrayList<EpgMetadataTask> mEpgMetadataTasks = new ArrayList<>();
+    private ArrayList<String> mUpdatedServices = new ArrayList<>();
 
     public EpgManager(DatabaseHandler dbHandler) {
         mDbHandler = dbHandler;
@@ -135,7 +137,9 @@ public class EpgManager {
                             long endTime = (currentTimestamp + EPG_INTERVAL * 7) - currentTimestamp % EPG_INTERVAL;
                             builder.appendQueryParameter("start", String.valueOf(startTime));
                             builder.appendQueryParameter("end", String.valueOf(endTime));
-                            new EpgMetadataTask(entry.getKey(), entry.getValue()).execute(builder.build().toString());
+                            EpgMetadataTask task = new EpgMetadataTask(entry.getKey(), entry.getValue());
+                            mEpgMetadataTasks.add(task);
+                            task.execute(builder.build().toString());
                         }
                     }
                 }
@@ -212,76 +216,80 @@ public class EpgManager {
 
         @Override
         public void onPostExecute(XmlNode epgMetadata) {
-            if (epgMetadata == null) {
-                return;
-            }
-            final List<String> parentalRatingNames = Arrays.asList("MinimumAge", "mpeg7:MinimumAge");
-            List<XmlNode> scheduleEvents = epgMetadata.getDescendantsByName("ScheduleEvent");
-            List<XmlNode> programmesInfo = epgMetadata.getDescendantsByName("ProgramInformation");
-            ArrayList<Programme> programmes = new ArrayList<>();
-            for (XmlNode info : programmesInfo) {
-                try {
-                    Programme.Builder builder = new Programme.Builder();
-                    String programId = info.getAttribute("programId");
-                    if (programId != null) {
-                        for (XmlNode event : scheduleEvents) {
-                            XmlNode programNode = event.getDescendantByName("Program");
-                            if (programNode != null && programId.equals(programNode.getAttribute("crid"))) {
-                                try {
-                                    long startTime = getSecondsFromDate(event.getDescendantByName("PublishedStartTime").getInnerText());
-                                    Duration duration = getDurationFromString(event.getDescendantByName("PublishedDuration").getInnerText());
-                                    builder.setStartTime(startTime);
-                                    builder.setEndTime(startTime + duration.getSeconds());
-                                }
-                                catch (Exception e) {
-                                    e.printStackTrace();
-                                }
-                                break;
-                            }
-                        }
-                    }
-                    List<XmlNode> descriptions = info.getDescendantsByName("Synopsis");
-                    for (XmlNode desc : descriptions) {
-                        switch (desc.getAttribute("length")) {
-                            case "medium":
-                                builder.setMediumDescription(desc.getInnerText());
-                                break;
-                            case "long":
-                                builder.setLongDescription(desc.getInnerText());
-                                break;
-                            default:
-                                builder.setShortDescription(desc.getInnerText());
-                                break;
-                        }
-                    }
-                    String minAge = "0";
-                    for (String name : parentalRatingNames) {
-                        XmlNode node = info.getDescendantByName(name);
-                        if (node != null) {
-                            minAge = node.getInnerText();
-                            break;
-                        }
-                    }
-
-                    programmes.add(builder
-                            .setTitle(info.getDescendantByName("Title").getInnerText())
-                            .setParentalRating(Integer.parseInt(minAge))
-                            .build());
-                }
-                catch (Exception e) {
-                    e.printStackTrace();
-                }
-            }
-            mDbHandler.updateProgrammesForService(mServiceUID, programmes);
             synchronized (mLock) {
-                for (Callback callback : mCallbacks) {
-                    callback.onEpgUpdated(mServiceUID);
+                if (epgMetadata != null) {
+                    final List<String> parentalRatingNames = Arrays.asList("MinimumAge", "mpeg7:MinimumAge");
+                    List<XmlNode> scheduleEvents = epgMetadata.getDescendantsByName("ScheduleEvent");
+                    List<XmlNode> programmesInfo = epgMetadata.getDescendantsByName("ProgramInformation");
+                    ArrayList<Programme> programmes = new ArrayList<>();
+                    mUpdatedServices.add(mServiceUID);
+                    for (XmlNode info : programmesInfo) {
+                        try {
+                            Programme.Builder builder = new Programme.Builder();
+                            String programId = info.getAttribute("programId");
+                            if (programId != null) {
+                                for (XmlNode event : scheduleEvents) {
+                                    XmlNode programNode = event.getDescendantByName("Program");
+                                    if (programNode != null && programId.equals(programNode.getAttribute("crid"))) {
+                                        try {
+                                            long startTime = getSecondsFromDate(event.getDescendantByName("PublishedStartTime").getInnerText());
+                                            Duration duration = getDurationFromString(event.getDescendantByName("PublishedDuration").getInnerText());
+                                            builder.setStartTime(startTime);
+                                            builder.setEndTime(startTime + duration.getSeconds());
+                                        } catch (Exception e) {
+                                            e.printStackTrace();
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                            List<XmlNode> descriptions = info.getDescendantsByName("Synopsis");
+                            for (XmlNode desc : descriptions) {
+                                switch (desc.getAttribute("length")) {
+                                    case "short":
+                                        builder.setShortDescription(desc.getInnerText());
+                                        break;
+                                    case "long":
+                                        builder.setLongDescription(desc.getInnerText());
+                                        break;
+                                    default:
+                                        builder.setMediumDescription(desc.getInnerText());
+                                        break;
+                                }
+                            }
+                            String minAge = "0";
+                            for (String name : parentalRatingNames) {
+                                XmlNode node = info.getDescendantByName(name);
+                                if (node != null) {
+                                    minAge = node.getInnerText();
+                                    break;
+                                }
+                            }
+
+                            programmes.add(builder
+                                    .setTitle(info.getDescendantByName("Title").getInnerText())
+                                    .setProgramId(programId)
+                                    .setParentalRating(Integer.parseInt(minAge))
+                                    .build());
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    }
+                    mDbHandler.updateProgrammesForService(mServiceUID, programmes);
+                }
+                mEpgMetadataTasks.remove(this);
+                if (mEpgMetadataTasks.isEmpty() && !mUpdatedServices.isEmpty()) {
+                    List<String> updatedServices = new ArrayList<>(mUpdatedServices);
+                    for (Callback callback : mCallbacks) {
+                        callback.onEpgUpdated(updatedServices);
+                    }
+                    mUpdatedServices.clear();
                 }
             }
         }
     }
 
     public interface Callback {
-        void onEpgUpdated(String serviceUID);
+        void onEpgUpdated(List<String> serviceUIDs);
     }
 }

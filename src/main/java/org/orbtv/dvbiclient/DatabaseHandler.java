@@ -20,7 +20,7 @@ import java.util.Map;
 
 public class DatabaseHandler extends SQLiteOpenHelper {
     private static final String TAG = DatabaseHandler.class.getSimpleName();
-    private static final int DB_VERSION = 25;
+    private static final int DB_VERSION = 26;
     private static final String DB_NAME = "dvbi_db";
     private static final String FOREIGN_KEY_PREFIX_SERVICE = "service_";
     private static final String FOREIGN_KEY_PREFIX_INSTANCE = "instance_";
@@ -111,6 +111,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                 + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
                 + COLUMN_FOREIGN_KEY + " TEXT NOT NULL, "
                 + Programme.DB_COLUMN_TITLE + " TEXT, "
+                + Programme.DB_COLUMN_PROGRAM_ID + " TEXT, "
                 + Programme.DB_COLUMN_SHORT_DESCRIPTION + " TEXT, "
                 + Programme.DB_COLUMN_MEDIUM_DESCRIPTION + " TEXT, "
                 + Programme.DB_COLUMN_LONG_DESCRIPTION + " TEXT, "
@@ -273,7 +274,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
         ArrayList<Programme> programmes = new ArrayList<>();
         String[] projection = { Programme.DB_COLUMN_TITLE, Programme.DB_COLUMN_SHORT_DESCRIPTION, Programme.DB_COLUMN_MEDIUM_DESCRIPTION,
                 Programme.DB_COLUMN_LONG_DESCRIPTION, Programme.DB_COLUMN_PARENTAL_RATING, Programme.DB_COLUMN_START_TIME,
-                Programme.DB_COLUMN_END_TIME };
+                Programme.DB_COLUMN_END_TIME, Programme.DB_COLUMN_PROGRAM_ID };
         String start = String.valueOf(startTime);
         String end = String.valueOf(endTime);
         String[] selectionArgs = { serviceUID, start, start, end, end, start, end, limit.toString() };
@@ -298,6 +299,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                             .setParentalRating(cursor.getInt(4))
                             .setStartTime(cursor.getLong(5))
                             .setEndTime(cursor.getLong(6))
+                            .setProgramId(cursor.getString(7))
                             .build());
                 }
             }
