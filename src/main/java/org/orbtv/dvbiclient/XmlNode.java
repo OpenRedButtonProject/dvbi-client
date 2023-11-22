@@ -50,6 +50,21 @@ public class XmlNode {
         }
         return null;
     }
+    public XmlNode getFirstChild() {
+        if (!mChildren.isEmpty()) {
+            return mChildren.get(0);
+        }
+        return null;
+    }
+    public XmlNode getNextSibling() {
+        if (mParentNode != null) {
+            int index = mParentNode.mChildren.indexOf(this);
+            if (index >= 0 && index + 1 < mParentNode.mChildren.size()) {
+                return mParentNode.mChildren.get(index + 1);
+            }
+        }
+        return null;
+    }
     @Override
     public String toString() {
         return "<" + mName + ">"

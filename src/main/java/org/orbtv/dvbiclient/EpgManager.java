@@ -200,6 +200,7 @@ public class EpgManager {
                         if (mTimestamp != null) {
                             // TODO: update request time
                             // mTimestamp.set(connection.getHeaderField("Cache-Control"));
+                            mTimestamp.set(System.currentTimeMillis() / 1000 + 300);
                         }
                     }
                     return XmlNode.parse(responseBuilder.toString());
@@ -218,7 +219,8 @@ public class EpgManager {
         public void onPostExecute(XmlNode epgMetadata) {
             synchronized (mLock) {
                 if (epgMetadata != null) {
-                    final List<String> parentalRatingNames = Arrays.asList("MinimumAge", "mpeg7:MinimumAge");
+                    final List<String> minimumAgeNames = Arrays.asList("MinimumAge", "mpeg7:MinimumAge");
+                    final List<String> parentalRatingNames = Arrays.asList("ParentalRating", "mpeg7:ParentalRating");
                     List<XmlNode> scheduleEvents = epgMetadata.getDescendantsByName("ScheduleEvent");
                     List<XmlNode> programmesInfo = epgMetadata.getDescendantsByName("ProgramInformation");
                     ArrayList<Programme> programmes = new ArrayList<>();
@@ -258,18 +260,32 @@ public class EpgManager {
                                 }
                             }
                             String minAge = "0";
-                            for (String name : parentalRatingNames) {
-                                XmlNode node = info.getDescendantByName(name);
-                                if (node != null) {
+                            String ratingScheme = null;
+                            String explanatoryText = null;
+                            List<XmlNode> parentalGuidanceNodes = info.getDescendantsByName("ParentalGuidance");
+                            if (!parentalGuidanceNodes.isEmpty()) {
+                                XmlNode node = parentalGuidanceNodes.get(0).getFirstChild();
+                                if (node != null && minimumAgeNames.contains(node.getName())) {
                                     minAge = node.getInnerText();
-                                    break;
+                                    if (parentalGuidanceNodes.size() > 1) {
+                                        node = parentalGuidanceNodes.get(1).getFirstChild();
+                                        if (node != null && parentalRatingNames.contains(node.getName())) {
+                                            ratingScheme = node.getAttribute("href");
+                                            node = node.getNextSibling();
+                                            if (node != null) {
+                                                explanatoryText = node.getInnerText();
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
                             programmes.add(builder
                                     .setTitle(info.getDescendantByName("Title").getInnerText())
                                     .setProgramId(programId)
-                                    .setParentalRating(Integer.parseInt(minAge))
+                                    .setMinimumAge(Integer.parseInt(minAge))
+                                    .setParentalRatingScheme(ratingScheme)
+                                    .setParentalRatingDescription(explanatoryText)
                                     .build());
                         } catch (Exception e) {
                             e.printStackTrace();

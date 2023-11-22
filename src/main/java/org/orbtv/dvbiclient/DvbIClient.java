@@ -387,7 +387,7 @@ public class DvbIClient {
                 long currentTime = System.currentTimeMillis() / 1000;
                 List<Programme> programmes = mDbHandler.getProgrammesForService(service.getUniqueIdentifier(), currentTime, currentTime, 1);
                 if (!programmes.isEmpty()) {
-                    mBlocked = programmes.get(0).getParentalRating() > rating;
+                    mBlocked = programmes.get(0).getMinimumAge() > rating;
                 }
                 for (HbbTVCallback callback1 : mHbbTVCallbacks) {
                     callback1.onParentalRatingChange(mBlocked);
@@ -679,7 +679,8 @@ public class DvbIClient {
             for (Programme programme : programmes) {
                 InternalProviderData data = new InternalProviderData();
                 try {
-                    data.put("RATING", programme.getParentalRating());
+                    data.put("RATING", programme.getMinimumAge());
+                    data.put("RATING_SCHEME", programme.getParentalRatingScheme());
                     data.put("DVB_URI", programme.getProgramId());
                     data.put("PROGRAM_ID_TYPE", 0);
 
@@ -695,7 +696,7 @@ public class DvbIClient {
                         .setLongDescription(programme.getLongDescription())
                         .setStartTimeUtcMillis(programme.getStartTime() * 1000)
                         .setEndTimeUtcMillis(programme.getEndTime() * 1000)
-                        .setContentRatings(createContentRating(programme.getParentalRating()))
+                        .setContentRatings(createContentRating(programme.getMinimumAge()))
                         .setInternalProviderData(data)
                         .build());
             }

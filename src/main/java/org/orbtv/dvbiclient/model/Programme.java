@@ -10,8 +10,12 @@ public class Programme {
     public static final String DB_COLUMN_LONG_DESCRIPTION = "long_description";
     public static final String DB_COLUMN_START_TIME = "start_time";
     public static final String DB_COLUMN_END_TIME = "end_time";
+    public static final String DB_COLUMN_MINIMUM_AGE = "minimum_age";
     public static final String DB_COLUMN_PARENTAL_RATING = "parental_rating";
-    private int mParentalRating;
+    public static final String DB_COLUMN_PARENTAL_RATING_DESC = "parental_rating_desc";
+    private String mParentalRating;
+    private String mParentalRatingDesc;
+    private int mMinimumAge;
     private String mProgramId;
     private String mTitle;
     private String mShortDescription;
@@ -22,7 +26,8 @@ public class Programme {
 
     private Programme() { }
 
-    public int getParentalRating() { return mParentalRating; }
+    public String getParentalRatingScheme() { return mParentalRating; }
+    public String getParentalRatingDescription() { return mParentalRatingDesc; }
     public String getTitle() { return mTitle; }
     public String getShortDescription() { return mShortDescription; }
     public String getMediumDescription() { return mMediumDescription; }
@@ -30,17 +35,21 @@ public class Programme {
     public long getStartTime() { return mStartTime; }
     public long getEndTime() { return mEndTime; }
     public String getProgramId() { return mProgramId; }
+    public int getMinimumAge() { return mMinimumAge; }
     @Override
     public String toString() {
-        return "--- Programme ---"
-                + "\n  Title: " + mTitle
-                + "\n  Program id: " + mProgramId
-                + "\n  Short desc: " + mShortDescription
-                + "\n  Medium desc: " + mMediumDescription
-                + "\n  Long desc: " + mLongDescription
-                + "\n  Start time: " + mStartTime
-                + "\n  End Time: " + mEndTime
-                + "\n  Parental rating: " + mParentalRating;
+        return "Programme {"
+                + " mTitle: " + mTitle
+                + ", mProgramId: " + mProgramId
+                + ", mShortDescription: " + mShortDescription
+                + ", mMediumDescription: " + mMediumDescription
+                + ", mLongDescription: " + mLongDescription
+                + ", mStartTime: " + mStartTime
+                + ", mEndTime: " + mEndTime
+                + ", mMinimumAge: " + mMinimumAge
+                + ", mParentalRating: " + mParentalRating
+                + ", mParentalRatingDesc: " + mParentalRatingDesc
+                + " }";
     }
 
     public ContentValues toContentValues() {
@@ -51,6 +60,8 @@ public class Programme {
         values.put(Programme.DB_COLUMN_MEDIUM_DESCRIPTION, mMediumDescription);
         values.put(Programme.DB_COLUMN_LONG_DESCRIPTION, mLongDescription);
         values.put(Programme.DB_COLUMN_PARENTAL_RATING, mParentalRating);
+        values.put(Programme.DB_COLUMN_PARENTAL_RATING_DESC, mParentalRatingDesc);
+        values.put(Programme.DB_COLUMN_MINIMUM_AGE, mMinimumAge);
         values.put(Programme.DB_COLUMN_START_TIME, mStartTime);
         values.put(Programme.DB_COLUMN_END_TIME, mEndTime);
         return values;
@@ -63,8 +74,18 @@ public class Programme {
             mInstance = new Programme();
         }
 
-        public Programme.Builder setParentalRating(int value) {
+        public Programme.Builder setParentalRatingScheme(String value) {
             mInstance.mParentalRating = value;
+            return this;
+        }
+
+        public Programme.Builder setParentalRatingDescription(String value) {
+            mInstance.mParentalRatingDesc = value;
+            return this;
+        }
+
+        public Programme.Builder setMinimumAge(int value) {
+            mInstance.mMinimumAge = value;
             return this;
         }
 
@@ -106,6 +127,8 @@ public class Programme {
         public Programme build() {
             Programme instance = new Programme();
             instance.mParentalRating = mInstance.mParentalRating;
+            instance.mParentalRatingDesc = mInstance.mParentalRatingDesc;
+            instance.mMinimumAge = mInstance.mMinimumAge;
             instance.mTitle = mInstance.mTitle;
             instance.mProgramId = mInstance.mProgramId;
             instance.mShortDescription = mInstance.mShortDescription;

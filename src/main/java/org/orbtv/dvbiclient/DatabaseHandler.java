@@ -20,7 +20,7 @@ import java.util.Map;
 
 public class DatabaseHandler extends SQLiteOpenHelper {
     private static final String TAG = DatabaseHandler.class.getSimpleName();
-    private static final int DB_VERSION = 26;
+    private static final int DB_VERSION = 27;
     private static final String DB_NAME = "dvbi_db";
     private static final String FOREIGN_KEY_PREFIX_SERVICE = "service_";
     private static final String FOREIGN_KEY_PREFIX_INSTANCE = "instance_";
@@ -117,7 +117,9 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                 + Programme.DB_COLUMN_LONG_DESCRIPTION + " TEXT, "
                 + Programme.DB_COLUMN_START_TIME + " INTEGER NOT NULL, "
                 + Programme.DB_COLUMN_END_TIME + " INTEGER NOT NULL, "
-                + Programme.DB_COLUMN_PARENTAL_RATING + " INTEGER)"
+                + Programme.DB_COLUMN_MINIMUM_AGE + " INTEGER, "
+                + Programme.DB_COLUMN_PARENTAL_RATING + " TEXT, "
+                + Programme.DB_COLUMN_PARENTAL_RATING_DESC + " TEXT)"
         );
     }
 
@@ -274,7 +276,8 @@ public class DatabaseHandler extends SQLiteOpenHelper {
         ArrayList<Programme> programmes = new ArrayList<>();
         String[] projection = { Programme.DB_COLUMN_TITLE, Programme.DB_COLUMN_SHORT_DESCRIPTION, Programme.DB_COLUMN_MEDIUM_DESCRIPTION,
                 Programme.DB_COLUMN_LONG_DESCRIPTION, Programme.DB_COLUMN_PARENTAL_RATING, Programme.DB_COLUMN_START_TIME,
-                Programme.DB_COLUMN_END_TIME, Programme.DB_COLUMN_PROGRAM_ID };
+                Programme.DB_COLUMN_END_TIME, Programme.DB_COLUMN_PROGRAM_ID, Programme.DB_COLUMN_MINIMUM_AGE,
+                Programme.DB_COLUMN_PARENTAL_RATING_DESC };
         String start = String.valueOf(startTime);
         String end = String.valueOf(endTime);
         String[] selectionArgs = { serviceUID, start, start, end, end, start, end, limit.toString() };
@@ -296,10 +299,12 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                             .setShortDescription(cursor.getString(1))
                             .setMediumDescription(cursor.getString(2))
                             .setLongDescription(cursor.getString(3))
-                            .setParentalRating(cursor.getInt(4))
+                            .setParentalRatingScheme(cursor.getString(4))
                             .setStartTime(cursor.getLong(5))
                             .setEndTime(cursor.getLong(6))
                             .setProgramId(cursor.getString(7))
+                            .setMinimumAge(cursor.getInt(8))
+                            .setParentalRatingDescription(cursor.getString(9))
                             .build());
                 }
             }
