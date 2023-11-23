@@ -588,8 +588,14 @@ public class DvbIClient {
         long end = (currentTime + 10800 * 7) - currentTime % 10800;
         for (String uid : mUpdatedServiceEPGs) {
             Service service = mDbHandler.getServiceForUID(uid);
-            if (service != null) {
+            Log.d(TAG, "Get updated event period for service " + uid);
+
+            // TODO: In case the triplet is null, return the child instance's triplet
+            if (service != null && service.getTriplet() != null) {
                 eventPeriods.add(new EventPeriod(service.getTriplet().toString(), start, end));
+            }
+            else {
+                Log.w(TAG, "Either the service with uid " + uid + " or its triplet is null!!!");
             }
         }
         return eventPeriods;
@@ -683,7 +689,6 @@ public class DvbIClient {
                     data.put("RATING_SCHEME", programme.getParentalRatingScheme());
                     data.put("DVB_URI", programme.getProgramId());
                     data.put("PROGRAM_ID_TYPE", 0);
-
                 } catch (InternalProviderData.ParseException e) {
                     e.printStackTrace();
                 }

@@ -21,9 +21,7 @@ import java.net.URL;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 public class EpgManager {
     private static final String TAG = EpgManager.class.getSimpleName();
@@ -56,7 +54,7 @@ public class EpgManager {
                     List<XmlNode> uris = cgs.getDescendantsByName("URI");
                     for (XmlNode uri : uris) {
                         if ("ScheduleInfoEndpoint".equals(uri.getParentNode().getName())) {
-                            new EpgMetadataTask(service.getUniqueIdentifier(), null).execute(uri.getInnerText());
+                            new EpgMetadataTask(new EpgTaskInfo(service.getUniqueIdentifier(), Uri.parse(uri.getInnerText()))).execute();
                         }
                     }
                 }
@@ -80,17 +78,8 @@ public class EpgManager {
         }
     }
 
-    private static class MutableLong {
-        private Long mValue;
-        public MutableLong(Long value) { set(value); }
-        public void set(Long value) { mValue = value; };
-        public Long get() { return mValue; }
-    }
-
     private class EpgRunnable implements Runnable {
-        private static final long EPG_INTERVAL = 10800;
-        private final HashMap<String, MutableLong> mRequestTimes = new HashMap<>();
-        private final HashMap<String, Uri> mScheduleUris = new HashMap<>();
+        private final ArrayList<EpgTaskInfo> mScheduleInfos = new ArrayList<>();
 
         public EpgRunnable() {
             refreshServiceLists();
@@ -99,8 +88,8 @@ public class EpgManager {
         public void refreshServiceLists() {
             List<ServiceList> serviceLists = mDbHandler.getServiceLists();
             synchronized (mLock) {
-                mScheduleUris.clear();
-                mRequestTimes.clear();
+                mScheduleInfos.clear();
+                long currentTime = System.currentTimeMillis() / 1000;
                 for (ServiceList list : serviceLists) {
                     for (Service service : list.getServices()) {
                         ContentGuide guide = service.getContentGuide();
@@ -110,12 +99,12 @@ public class EpgManager {
                             if (serviceRef == null) {
                                 serviceRef = uid;
                             }
-                            Uri baseUri = Uri.parse(guide.getScheduleInfoEndpointURI());
-                            Uri.Builder builder = baseUri.buildUpon();
                             if (!serviceRef.isEmpty()) {
-                                builder.appendQueryParameter("sid", serviceRef);
-                                mScheduleUris.put(uid, builder.build());
-                                mRequestTimes.put(uid, new MutableLong(System.currentTimeMillis() / 1000));
+                                Uri baseUri = Uri.parse(guide.getScheduleInfoEndpointURI());
+                                Uri.Builder builder = baseUri.buildUpon();
+                                builder.appendQueryParameter("sid", uid);
+                                mScheduleInfos.add(new EpgTaskInfo(uid, builder.build()));
+                                mScheduleInfos.get(mScheduleInfos.size() - 1).nextUpdate = currentTime;
                             }
                         }
                     }
@@ -128,18 +117,15 @@ public class EpgManager {
             while (true) {
                 synchronized (mLock) {
                     long currentTimestamp = System.currentTimeMillis() / 1000;
-                    for (Map.Entry<String, MutableLong> entry : mRequestTimes.entrySet()) {
-                        if (entry.getValue().get() != null && entry.getValue().get() <= currentTimestamp) {
-                            Log.i(TAG, "Updating EPG for Service " + entry.getKey());
-                            entry.getValue().set(null);
-                            Uri.Builder builder = mScheduleUris.get(entry.getKey()).buildUpon();
-                            long startTime = (currentTimestamp - EPG_INTERVAL) - currentTimestamp % EPG_INTERVAL;
-                            long endTime = (currentTimestamp + EPG_INTERVAL * 7) - currentTimestamp % EPG_INTERVAL;
-                            builder.appendQueryParameter("start", String.valueOf(startTime));
-                            builder.appendQueryParameter("end", String.valueOf(endTime));
-                            EpgMetadataTask task = new EpgMetadataTask(entry.getKey(), entry.getValue());
-                            mEpgMetadataTasks.add(task);
-                            task.execute(builder.build().toString());
+                    for (EpgTaskInfo info : mScheduleInfos) {
+                        if (info.nextUpdate != null && info.nextUpdate <= currentTimestamp) {
+                            Log.i(TAG, "Updating EPG for Service " + info.getServiceUID());
+                            synchronized (info) {
+                                info.nextUpdate = null;
+                                EpgMetadataTask task = new EpgMetadataTask(info);
+                                mEpgMetadataTasks.add(task);
+                                task.execute();
+                            }
                         }
                     }
                 }
@@ -153,23 +139,30 @@ public class EpgManager {
         }
     }
 
-    private class EpgMetadataTask extends AsyncUtils<XmlNode, String> {
-        private final String mServiceUID;
-        private final MutableLong mTimestamp;
+    private class EpgMetadataTask extends AsyncUtils<XmlNode, Void> {
+        private static final long EPG_INTERVAL = 10800;
+        private final EpgTaskInfo mTaskInfo;
 
-        public EpgMetadataTask(String serviceUID, MutableLong timestamp) {
-            mServiceUID = serviceUID;
-            mTimestamp = timestamp;
+        public EpgMetadataTask(EpgTaskInfo taskInfo) {
+            mTaskInfo = taskInfo;
         }
 
         @Override
-        protected XmlNode doInBackground(String... uris) {
-            String uri;
-            if (uris.length > 0) {
-                uri = uris[0];
+        protected XmlNode doInBackground(Void... ignore) {
+            synchronized (mTaskInfo) {
                 try {
-                    Log.d(TAG,"Request EPG Metadata from: " + uri);
-                    URL url = new URL(uri);
+                    Log.d(TAG, "Request EPG Metadata for: " + mTaskInfo.getServiceUID());
+                    Uri.Builder builder = mTaskInfo.getmEndPointUri().buildUpon();
+                    if (mTaskInfo.isNowNext) {
+                        builder.appendQueryParameter("now_next", "true");
+                    } else {
+                        long currentTimestamp = System.currentTimeMillis() / 1000;
+                        long startTime = (currentTimestamp - EPG_INTERVAL) - currentTimestamp % EPG_INTERVAL;
+                        long endTime = (currentTimestamp + EPG_INTERVAL * 7) - currentTimestamp % EPG_INTERVAL;
+                        builder.appendQueryParameter("start", String.valueOf(startTime));
+                        builder.appendQueryParameter("end", String.valueOf(endTime));
+                    }
+                    URL url = new URL(builder.build().toString());
                     boolean useHttps = false;
                     HttpURLConnection connection = (HttpURLConnection) url.openConnection();
                     //                if (useHttps) {
@@ -182,7 +175,7 @@ public class EpgManager {
                     connection.setRequestMethod("GET");
                     connection.setRequestProperty("Content-Type", "application/xml");
                     int responseCode = connection.getResponseCode();
-                    Log.i(TAG, "Response Code: " + responseCode);
+                    Log.i(TAG, mTaskInfo.getServiceUID() + " response Code: " + responseCode);
                     Log.i(TAG, "Cache control: " + connection.getHeaderField("Cache-Control"));
 
                     InputStream inputStream = connection.getInputStream();
@@ -196,19 +189,21 @@ public class EpgManager {
 
                     Log.d(TAG, responseBuilder.toString());
 
-                    synchronized (mLock) {
-                        if (mTimestamp != null) {
-                            // TODO: update request time
-                            // mTimestamp.set(connection.getHeaderField("Cache-Control"));
-                            mTimestamp.set(System.currentTimeMillis() / 1000 + 300);
-                        }
+                    if (!mTaskInfo.isNowNext && responseBuilder.length() <= 0) {
+                        mTaskInfo.isNowNext = true;
+                        return doInBackground();
+                    }
+                    mTaskInfo.isNowNext = false;
+
+                    if (mTaskInfo.nextUpdate != null) {
+                        // TODO: update request time
+                        // mTimestamp.set(connection.getHeaderField("Cache-Control"));
+                        mTaskInfo.nextUpdate = System.currentTimeMillis() / 1000 + 300;
                     }
                     return XmlNode.parse(responseBuilder.toString());
-                }
-                catch(IOException e) {
+                } catch (IOException e) {
                     Log.e(TAG, "Error sending request", e);
-                }
-                catch(Exception e) {
+                } catch (Exception e) {
                     Log.e(TAG, "Error configuring SSL context", e);
                 }
             }
@@ -224,7 +219,7 @@ public class EpgManager {
                     List<XmlNode> scheduleEvents = epgMetadata.getDescendantsByName("ScheduleEvent");
                     List<XmlNode> programmesInfo = epgMetadata.getDescendantsByName("ProgramInformation");
                     ArrayList<Programme> programmes = new ArrayList<>();
-                    mUpdatedServices.add(mServiceUID);
+                    mUpdatedServices.add(mTaskInfo.getServiceUID());
                     for (XmlNode info : programmesInfo) {
                         try {
                             Programme.Builder builder = new Programme.Builder();
@@ -291,7 +286,7 @@ public class EpgManager {
                             e.printStackTrace();
                         }
                     }
-                    mDbHandler.updateProgrammesForService(mServiceUID, programmes);
+                    mDbHandler.updateProgrammesForService(mTaskInfo.getServiceUID(), programmes);
                 }
                 mEpgMetadataTasks.remove(this);
                 if (mEpgMetadataTasks.isEmpty() && !mUpdatedServices.isEmpty()) {
@@ -303,6 +298,19 @@ public class EpgManager {
                 }
             }
         }
+    }
+
+    private static class EpgTaskInfo {
+        public Long nextUpdate = null;
+        public boolean isNowNext = false;
+        public Uri mEndPointUri;
+        private String mServiceUID;
+        public EpgTaskInfo(String serviceUID, Uri endPointUri) {
+            mServiceUID = serviceUID;
+            mEndPointUri = endPointUri;
+        }
+        public String getServiceUID() { return mServiceUID; }
+        public Uri getmEndPointUri() { return mEndPointUri; }
     }
 
     public interface Callback {
