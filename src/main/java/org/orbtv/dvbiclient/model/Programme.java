@@ -36,6 +36,20 @@ public class Programme {
     public long getEndTime() { return mEndTime; }
     public String getProgramId() { return mProgramId; }
     public int getMinimumAge() { return mMinimumAge; }
+
+    public boolean equals(Programme other) {
+        return other != null
+                && mTitle.equals(other.mTitle)
+                && mProgramId.equals(other.mProgramId)
+                && mShortDescription.equals(other.mShortDescription)
+                && mMediumDescription.equals(other.mMediumDescription)
+                && mLongDescription.equals(other.mLongDescription)
+                && mStartTime == other.mStartTime
+                && mEndTime == other.mEndTime
+                && mMinimumAge == other.mMinimumAge
+                && mParentalRating.equals(other.mParentalRating)
+                && mParentalRatingDesc.equals(other.mParentalRatingDesc);
+    }
     @Override
     public String toString() {
         return "Programme {"

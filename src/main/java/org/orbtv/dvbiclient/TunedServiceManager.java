@@ -3,22 +3,36 @@ package org.orbtv.dvbiclient;
 import android.util.Log;
 
 import org.orbtv.dvbiclient.model.AvailabilityPeriod;
+import org.orbtv.dvbiclient.model.Programme;
 import org.orbtv.dvbiclient.model.Service;
 import org.orbtv.dvbiclient.model.ServiceInstance;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class TunedServiceManager {
     private static final String TAG = TunedServiceManager.class.getSimpleName();
-    private Callback mCallback;
-    private AvailabilityPeriodRunnable mAvailabilityPeriodRunnable = null;
-    private Thread mAvailabilityPeriodThread = null;
+    private ArrayList<Callback> mCallbacks = new ArrayList<>();
+    private TunedServiceRunnable mTunedServiceRunnable = null;
+    private Thread mTunedServiceThread = null;
     private Service mTunedService = null;
     private ServiceInstance mTunedInstance = null;
+    private DatabaseHandler mDbHandler;
+    private Programme mNowProgramme = null;
     private final Object mLock = new Object();
 
-    public TunedServiceManager(Callback callback) {
-        mCallback = callback;
+    public TunedServiceManager(EpgManager epgManager, DatabaseHandler dbHandler) {
+        mDbHandler = dbHandler;
+        epgManager.registerCallback(serviceUIDs -> {
+            synchronized (mLock) {
+                if (mTunedService != null) {
+                    String uid = mTunedService.getUniqueIdentifier();
+                    if (serviceUIDs.contains(uid)) {
+                        updateNowProgramme();
+                    }
+                }
+            }
+        });
     }
 
     public boolean tune(Service service, int instanceIndex) {
@@ -42,21 +56,41 @@ public class TunedServiceManager {
         synchronized (mLock) {
             mTunedService = service;
             mTunedInstance = instance;
-            mCallback.onInstanceChanged(null, mTunedInstance);
-            startInstanceAvailabilityThread(instanceIndex >= 0);
+            updateNowProgramme();
+            for (Callback callback : mCallbacks) {
+                callback.onInstanceChanged(null, mTunedInstance);
+            }
+            startTunedServiceThread(instanceIndex >= 0);
         }
         return true;
     }
 
     public void tuneOff() {
-        stopInstanceAvailabilityThread();
+        stopTunedServiceThread();
         synchronized (mLock) {
             mTunedService = null;
+            mNowProgramme = null;
             mTunedInstance = null;
         }
     }
 
+    public void registerCallback(Callback handler) {
+        synchronized (mLock) {
+            if (!mCallbacks.contains(handler)) {
+                mCallbacks.add(handler);
+            }
+        }
+    }
+
+    public void unregisterCallback(Callback handler) {
+        synchronized (mLock) {
+            mCallbacks.remove(handler);
+        }
+    }
+
     public synchronized Service getTunedService() { return mTunedService; }
+
+    public Programme getNowProgramme() { return mNowProgramme; }
 
     public synchronized ServiceInstance getTunedInstance() { return mTunedInstance; }
 
@@ -67,22 +101,37 @@ public class TunedServiceManager {
                 .build();
     }
 
-    private void startInstanceAvailabilityThread(boolean forceTunedInstance) {
+    private void startTunedServiceThread(boolean forceTunedInstance) {
         synchronized (mLock) {
-            if (mAvailabilityPeriodRunnable == null) {
-                mAvailabilityPeriodRunnable = new AvailabilityPeriodRunnable(forceTunedInstance);
-                mAvailabilityPeriodThread = new Thread(mAvailabilityPeriodRunnable);
-                mAvailabilityPeriodThread.start();
+            if (mTunedServiceRunnable == null) {
+                mTunedServiceRunnable = new TunedServiceRunnable(forceTunedInstance);
+                mTunedServiceThread = new Thread(mTunedServiceRunnable);
+                mTunedServiceThread.start();
+            }
+        }
+    }
+    
+    private void updateNowProgramme() {
+        long currentTime = System.currentTimeMillis() / 1000;
+        List<Programme> programmes = mDbHandler.getProgrammesForService(mTunedService.getUniqueIdentifier(), currentTime, currentTime, 1);
+        Programme programme = null;
+        if (!programmes.isEmpty()) {
+            programme = programmes.get(0);
+        }
+        if ((programme != null && !programme.equals(mNowProgramme)) || mNowProgramme != null) {
+            mNowProgramme = programme;
+            for (Callback callback : mCallbacks) {
+                callback.onNowProgrammeUpdated(programme);
             }
         }
     }
 
-    private void stopInstanceAvailabilityThread() {
+    private void stopTunedServiceThread() {
         synchronized (mLock) {
-            if (mAvailabilityPeriodRunnable != null) {
-                mAvailabilityPeriodRunnable.stop();
-                mAvailabilityPeriodThread = null;
-                mAvailabilityPeriodRunnable = null;
+            if (mTunedServiceRunnable != null) {
+                mTunedServiceRunnable.stop();
+                mTunedServiceThread = null;
+                mTunedServiceRunnable = null;
             }
         }
     }
@@ -128,11 +177,11 @@ public class TunedServiceManager {
         return false;
     }
 
-    private class AvailabilityPeriodRunnable implements Runnable {
+    private class TunedServiceRunnable implements Runnable {
         private volatile boolean mIsRunning = false;
         private ServiceInstance mTargetInstance;
 
-        public AvailabilityPeriodRunnable(boolean forceTunedInstance) {
+        public TunedServiceRunnable(boolean forceTunedInstance) {
             if (forceTunedInstance) {
                 synchronized (mLock) {
                     mTargetInstance = mTunedInstance;
@@ -143,7 +192,7 @@ public class TunedServiceManager {
         public void stop() {
             mIsRunning = false;
             Thread.currentThread().interrupt();
-            Log.i(TAG, "Stopping AvailabilityPeriodRunnable...");
+            Log.i(TAG, "Stopping TunedServiceRunnable...");
         }
 
         @Override
@@ -152,13 +201,20 @@ public class TunedServiceManager {
             mIsRunning = true;
             while (mIsRunning) {
                 synchronized (mLock) {
+                    if (mNowProgramme != null) {
+                        long currentTime = System.currentTimeMillis() / 1000;
+                        if (mNowProgramme.getEndTime() < currentTime) {
+                            updateNowProgramme();
+                        }
+                    }
+
                     tunedInstance = mTunedInstance;
                     if (mTargetInstance == null) {
                         ServiceInstance priorityInstance = getMaxPriorityInstance(mTunedService);
                         if (priorityInstance != tunedInstance) {
                             mTunedInstance = priorityInstance;
-                            if (mCallback != null) {
-                                mCallback.onInstanceChanged(tunedInstance, priorityInstance);
+                            for (Callback callback : mCallbacks) {
+                                callback.onInstanceChanged(tunedInstance, priorityInstance);
                             }
                         }
                     }
@@ -169,8 +225,8 @@ public class TunedServiceManager {
                         else {
                             mTunedInstance = mTargetInstance;
                         }
-                        if (mCallback != null) {
-                            mCallback.onInstanceChanged(tunedInstance, mTunedInstance);
+                        for (Callback callback : mCallbacks) {
+                            callback.onInstanceChanged(tunedInstance, mTunedInstance);
                         }
                     }
                 }
@@ -182,11 +238,12 @@ public class TunedServiceManager {
                     stop();
                 }
             }
-            Log.i(TAG, "Stopped AvailabilityPeriodRunnable.");
+            Log.i(TAG, "Stopped TunedServiceRunnable.");
         }
     }
 
     public interface Callback {
         void onInstanceChanged(ServiceInstance fromInstance, ServiceInstance toInstance);
+        void onNowProgrammeUpdated(Programme programme);
     }
 }

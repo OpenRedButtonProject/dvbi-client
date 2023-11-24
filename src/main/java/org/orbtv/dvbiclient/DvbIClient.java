@@ -85,9 +85,9 @@ public class DvbIClient {
     private HashMap<Integer, Boolean> mIsUnselected = new HashMap<>();
     private ITvInputCallback mTvInputCallback;
     private final EpgManager mEpgManager;
-    private ArrayList<String> mUpdatedServiceEPGs = new ArrayList<>();
-
-    private final TunedServiceManager mServiceManager = new TunedServiceManager(new TunedServiceManager.Callback() {
+    private final TunedServiceManager mServiceManager;
+    private List<String> mUpdatedServiceEPGs = new ArrayList<>();
+    private final TunedServiceManager.Callback mServiceManagerCallback = new TunedServiceManager.Callback() {
         @Override
         public void onInstanceChanged(ServiceInstance fromInstance, ServiceInstance toInstance) {
             DvbIChannelAdapter channel;
@@ -102,26 +102,27 @@ public class DvbIClient {
                     String app_1_2 = channel.getLinkedAppUri(LINKED_APP_SCHEME_1_2);
                     if (app_1_2 == null) {
                         if (!mBlocked) {
-                            if ("dvb-dash".equals(toInstance.getDeliveryType())) {
-                                mTvInputCallback.tuneOffBroadcast();
-                                if (mDvbIView.tune(uri, mSubtitlesEnabled)) {
-                                    dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
+                            if (service.getParentalRating() == null || service.getParentalRating() <= mTvInputCallback.getParentalControlAge()) {
+                                if ("dvb-dash".equals(toInstance.getDeliveryType())) {
+                                    mTvInputCallback.tuneOffBroadcast();
+                                    if (mDvbIView.tune(uri, mSubtitlesEnabled)) {
+                                        dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
+                                    }
+                                } else {
+                                    mDvbIView.tuneOff();
+                                    mTracks.clear();
+                                    mSelectedTracks.clear();
+                                    mIsUnselected.clear();
+                                    mTvInputCallback.tuneBroadcast(toInstance.getTriplet().toString());
                                 }
                             } else {
-                                mDvbIView.tuneOff();
-                                mTracks.clear();
-                                mSelectedTracks.clear();
-                                mIsUnselected.clear();
-                                mTvInputCallback.tuneBroadcast(toInstance.getTriplet().toString());
+                                Log.i(TAG, "Service is blocked by parental control.");
+                                mBlocked = true;
+                                handleRatingBlocked(channel);
                             }
                         }
                         else {
-                            mDvbIView.tuneOff();
-                            mTracks.clear();
-                            mSelectedTracks.clear();
-                            mIsUnselected.clear();
-                            dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_BLOCKED);
-                            mTvInputCallback.tuneOffBroadcast();
+                            Log.i(TAG, "Now programme is blocked by parental control.");
                         }
                     } else {
                         mTvInputCallback.tuneOffBroadcast();
@@ -162,7 +163,36 @@ public class DvbIClient {
                 }
             }
         }
-    });
+
+        @Override
+        public void onNowProgrammeUpdated(Programme programme) {
+            boolean blocked = programme != null && programme.getMinimumAge() > mTvInputCallback.getParentalControlAge();
+            Log.i(TAG, "Now programme updated: " + programme);
+            if (mBlocked != blocked) {
+                mBlocked = blocked;
+                if (blocked) {
+                    handleRatingBlocked(mServiceManager.getTunedChannel());
+                }
+                else {
+                    onInstanceChanged(null, mServiceManager.getTunedInstance());
+                }
+                for (HbbTVCallback callback : mHbbTVCallbacks) {
+                    callback.onParentalRatingChange(mBlocked);
+                }
+            }
+        }
+
+        private void handleRatingBlocked(DvbIChannelAdapter channel) {
+            if (channel != null && channel == mServiceManager.getTunedChannel()) {
+                mDvbIView.tuneOff();
+                mTracks.clear();
+                mSelectedTracks.clear();
+                mIsUnselected.clear();
+                dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_BLOCKED);
+                mTvInputCallback.tuneOffBroadcast();
+            }
+        }
+    };
 
     private final DvbIView.JSCallback mJSCallback = new DvbIView.JSCallback() {
 
@@ -380,22 +410,11 @@ public class DvbIClient {
         mEpgManager = new EpgManager(mDbHandler);
         mEpgManager.registerCallback(serviceUIDs -> {
             Log.i(TAG, "Updated EPG for service UIDs" + serviceUIDs);
-            Service service = mServiceManager.getTunedService();
-            if (service != null && serviceUIDs.contains(service.getUniqueIdentifier())) {
-                int rating = mTvInputCallback.getParentalControlAge();
-                mBlocked = service.getParentalRating() != null && service.getParentalRating() < rating;
-                long currentTime = System.currentTimeMillis() / 1000;
-                List<Programme> programmes = mDbHandler.getProgrammesForService(service.getUniqueIdentifier(), currentTime, currentTime, 1);
-                if (!programmes.isEmpty()) {
-                    mBlocked = programmes.get(0).getMinimumAge() > rating;
-                }
-                for (HbbTVCallback callback1 : mHbbTVCallbacks) {
-                    callback1.onParentalRatingChange(mBlocked);
-                }
-            }
-            mUpdatedServiceEPGs = new ArrayList<>(serviceUIDs);
+            mUpdatedServiceEPGs = serviceUIDs;
             mTvInputCallback.updateEventPeriods();
         });
+        mServiceManager = new TunedServiceManager(mEpgManager, mDbHandler);
+        mServiceManager.registerCallback(mServiceManagerCallback);
     }
 
     public void setTvInputCallback(ITvInputCallback callback) {
@@ -516,14 +535,22 @@ public class DvbIClient {
         return mDvbIView;
     }
 
+    public void onParentalControlAgeChanged() {
+        if (mServiceManager.getTunedService() != null) {
+            mServiceManagerCallback.onNowProgrammeUpdated(mServiceManager.getNowProgramme());
+        }
+    }
+
     public synchronized boolean tune(String uid, int instanceIndex) {
+        boolean blocked = mBlocked;
+        mBlocked = false;
         if (mServiceManager.tune(mDbHandler.getServiceForUID(uid), instanceIndex)) {
             mTracks.clear();
             mSelectedTracks.clear();
             mIsUnselected.clear();
-            mBlocked = false;
             return true;
         }
+        mBlocked = blocked;
         Log.i(TAG, "Failed to tune to service with UID: " + uid);
         return false;
     }
