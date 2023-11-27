@@ -118,10 +118,13 @@ public class DvbIClient {
                             } else {
                                 Log.i(TAG, "Service is blocked by parental control.");
                                 mBlocked = true;
+                                launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1_1), LINKED_APP_SCHEME_1_1);
                                 handleRatingBlocked(channel);
                             }
                         }
                         else {
+                            launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1_1), LINKED_APP_SCHEME_1_1);
+                            handleRatingBlocked(channel);
                             Log.i(TAG, "Now programme is blocked by parental control.");
                         }
                     } else {
@@ -129,9 +132,7 @@ public class DvbIClient {
                         mDvbIView.tuneOff();
                         dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
                         mTvInputCallback.notifyVideoAvailable();
-
-                        Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_1_2 + "' from Related Materials (" + app_1_2 + ")");
-                        new GetXmlAitTask().execute(new XmlAitAttributes(app_1_2, LINKED_APP_SCHEME_1_2));
+                        launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1_2), LINKED_APP_SCHEME_1_2);
                     }
 
                     int index = service.getInstances().indexOf(toInstance);
@@ -151,10 +152,9 @@ public class DvbIClient {
                             PLAYER_STATUS_STARTING
                     );
                     if (channel.getLinkedAppUri(LINKED_APP_SCHEME_2) != null) {
-                        Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_2 + "' from Related Materials (" + channel.getLinkedAppUri(LINKED_APP_SCHEME_2) + ")");
-                        new GetXmlAitTask().execute(new XmlAitAttributes(channel.getLinkedAppUri(LINKED_APP_SCHEME_2), LINKED_APP_SCHEME_2));
+                        launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_2), LINKED_APP_SCHEME_2);
                     } else if (channel.getLinkedAppUri(LINKED_APP_SCHEME_1000_1) != null) {
-                        Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_1000_1 + "' from Related Materials (" + channel.getLinkedAppUri(LINKED_APP_SCHEME_1000_1) + ")");
+                        launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1000_1), LINKED_APP_SCHEME_1000_1);
                         mDvbIView.getContext().getMainExecutor().execute(() -> {
                             mDvbIView.setVisibility(View.VISIBLE);
                             mDvbIView.loadUrl(channel.getLinkedAppUri(LINKED_APP_SCHEME_1000_1));
@@ -170,20 +170,23 @@ public class DvbIClient {
             Log.i(TAG, "Now programme updated: " + programme);
             if (mBlocked != blocked) {
                 mBlocked = blocked;
-                if (blocked) {
-                    handleRatingBlocked(mServiceManager.getTunedChannel());
-                }
-                else {
-                    onInstanceChanged(null, mServiceManager.getTunedInstance());
-                }
+                ServiceInstance instance = mServiceManager.getTunedInstance();
+                onInstanceChanged(instance, instance);
                 for (HbbTVCallback callback : mHbbTVCallbacks) {
                     callback.onParentalRatingChange(mBlocked);
                 }
             }
         }
 
+        private void launchApp(String appUrl, String scheme) {
+            if (appUrl != null) {
+                Log.i(TAG, "Found Hbbtv App with scheme '" + scheme + "' from Related Materials (" + appUrl + ")");
+                new GetXmlAitTask().execute(new XmlAitAttributes(appUrl, scheme));
+            }
+        }
+
         private void handleRatingBlocked(DvbIChannelAdapter channel) {
-            if (channel != null && channel == mServiceManager.getTunedChannel()) {
+            if (channel != null) {
                 mDvbIView.tuneOff();
                 mTracks.clear();
                 mSelectedTracks.clear();

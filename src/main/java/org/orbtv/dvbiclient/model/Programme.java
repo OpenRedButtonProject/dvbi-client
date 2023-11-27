@@ -38,17 +38,17 @@ public class Programme {
     public int getMinimumAge() { return mMinimumAge; }
 
     public boolean equals(Programme other) {
-        return other != null
+        return other == this || (other != null
                 && mTitle.equals(other.mTitle)
                 && mProgramId.equals(other.mProgramId)
-                && mShortDescription.equals(other.mShortDescription)
-                && mMediumDescription.equals(other.mMediumDescription)
-                && mLongDescription.equals(other.mLongDescription)
+                && (mShortDescription == other.mShortDescription || mShortDescription.equals(other.mShortDescription))
+                && (mMediumDescription == other.mMediumDescription || mMediumDescription.equals(other.mMediumDescription))
+                && (mLongDescription == other.mLongDescription || mLongDescription.equals(other.mLongDescription))
                 && mStartTime == other.mStartTime
                 && mEndTime == other.mEndTime
                 && mMinimumAge == other.mMinimumAge
-                && mParentalRating.equals(other.mParentalRating)
-                && mParentalRatingDesc.equals(other.mParentalRatingDesc);
+                && (mParentalRating == other.mParentalRating || mParentalRating.equals(other.mParentalRating))
+                && (mParentalRatingDesc == other.mParentalRatingDesc || mParentalRatingDesc.equals(other.mParentalRatingDesc)));
     }
     @Override
     public String toString() {
