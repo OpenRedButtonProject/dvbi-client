@@ -6,6 +6,7 @@ import static org.orbtv.dvbiclient.Utils.getSecondsFromDate;
 import android.net.Uri;
 import android.util.Log;
 
+import org.orbtv.companionlibrary.model.Program;
 import org.orbtv.companionlibrary.utils.AsyncUtils;
 import org.orbtv.dvbiclient.model.ContentGuide;
 import org.orbtv.dvbiclient.model.Programme;
@@ -47,17 +48,10 @@ public class EpgManager {
     public void requestUpdateFromContentGuideSourceXML(Service service, String xml) {
         try {
             Log.i(TAG, "requesting epg update for service with UID " + service.getUniqueIdentifier() + " from ContentGuideSourceList...");
-            XmlNode contentGuideSourceList = XmlNode.parse(xml);
-            List<XmlNode> contentGuideSources = contentGuideSourceList.getDescendantsByName("ContentGuideSource");
-            for (XmlNode cgs : contentGuideSources) {
-                if (service.getContentGuide() != null && service.getContentGuide().getCGSID().equals(cgs.getAttribute("CGSID"))) {
-                    List<XmlNode> uris = cgs.getDescendantsByName("URI");
-                    for (XmlNode uri : uris) {
-                        if ("ScheduleInfoEndpoint".equals(uri.getParentNode().getName())) {
-                            new EpgMetadataTask(new EpgTaskInfo(service.getUniqueIdentifier(), Uri.parse(uri.getInnerText()))).execute();
-                        }
-                    }
-                }
+            XmlNode baseNode = XmlNode.parse(xml);
+            if (baseNode != null) {
+                findScheduleInfoEndpoints(service, baseNode);
+                findProgramInfo(service, baseNode);
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -76,6 +70,117 @@ public class EpgManager {
         synchronized (mLock) {
             mCallbacks.remove(handler);
         }
+    }
+
+    private void findScheduleInfoEndpoints(Service service, XmlNode baseNode) {
+        List<XmlNode> contentGuideSources = baseNode.getDescendantsByName("ContentGuideSource");
+        for (XmlNode cgs : contentGuideSources) {
+            if (service.getContentGuide() != null && service.getContentGuide().getCGSID().equals(cgs.getAttribute("CGSID"))) {
+                List<XmlNode> uris = cgs.getDescendantsByName("URI");
+                for (XmlNode uri : uris) {
+                    if ("ScheduleInfoEndpoint".equals(uri.getParentNode().getName())) {
+                        new EpgMetadataTask(new EpgTaskInfo(service.getUniqueIdentifier(), Uri.parse(uri.getInnerText()))).execute();
+                    }
+                }
+            }
+        }
+    }
+
+    private void findProgramInfo(Service service, XmlNode baseNode) {
+        XmlNode node = baseNode.getDescendantByName("InstanceDescription");
+        if (node != null) {
+            Programme.Builder builder = new Programme.Builder();
+            findDescriptions(node, builder);
+            findParentalGuidance(node, builder);
+            findTitle(node, builder);
+            findStartEndTimes(node, builder);
+            findProgramId(baseNode, builder, service.getUniqueIdentifier());
+            mDbHandler.updateProgrammesForService(service.getUniqueIdentifier(), Arrays.asList(builder.build()));
+            synchronized (mLock) {
+                for (Callback callback : mCallbacks) {
+                    callback.onEpgUpdated(Arrays.asList(service.getUniqueIdentifier()));
+                }
+            }
+        }
+    }
+
+    private void findProgramId(XmlNode node, Programme.Builder builder, String fallback) {
+        node = node.getDescendantByName("Program");
+        String programId = fallback;
+        if (node != null && node.getAttribute("crid") != null) {
+            programId = node.getAttribute("crid");
+        }
+        builder.setProgramId(programId);
+    }
+
+    private void findTitle(XmlNode node, Programme.Builder builder) {
+        node = node.getDescendantByName("Title");
+        if (node != null) {
+            builder.setTitle(node.getInnerText());
+        }
+    }
+
+    private void findDescriptions(XmlNode node, Programme.Builder builder) {
+        List<XmlNode> descriptions = node.getDescendantsByName("Synopsis");
+        for (XmlNode desc : descriptions) {
+            switch (desc.getAttribute("length")) {
+                case "short":
+                    builder.setShortDescription(desc.getInnerText());
+                    break;
+                case "long":
+                    builder.setLongDescription(desc.getInnerText());
+                    break;
+                default:
+                    builder.setMediumDescription(desc.getInnerText());
+                    break;
+            }
+        }
+    }
+
+    private void findParentalGuidance(XmlNode node, Programme.Builder builder) {
+        final List<String> minimumAgeNames = Arrays.asList("MinimumAge", "mpeg7:MinimumAge");
+        final List<String> parentalRatingNames = Arrays.asList("ParentalRating", "mpeg7:ParentalRating");
+        String minAge = "0";
+        String ratingScheme = null;
+        String explanatoryText = null;
+        List<XmlNode> parentalGuidanceNodes = node.getDescendantsByName("ParentalGuidance");
+        if (!parentalGuidanceNodes.isEmpty()) {
+            XmlNode n = parentalGuidanceNodes.get(0).getFirstChild();
+            if (n != null && minimumAgeNames.contains(n.getName())) {
+                minAge = n.getInnerText();
+                if (parentalGuidanceNodes.size() > 1) {
+                    n = parentalGuidanceNodes.get(1).getFirstChild();
+                    if (n != null && parentalRatingNames.contains(n.getName())) {
+                        ratingScheme = n.getAttribute("href");
+                        n = n.getNextSibling();
+                        if (n != null) {
+                            explanatoryText = n.getInnerText();
+                        }
+                    }
+                }
+            }
+        }
+        builder.setMinimumAge(Integer.parseInt(minAge))
+                .setParentalRatingScheme(ratingScheme)
+                .setParentalRatingDescription(explanatoryText);
+    }
+
+    private void findStartEndTimes(XmlNode node, Programme.Builder builder) {
+        long startTime = System.currentTimeMillis() / 1000;
+        long endTime = startTime + 86400;
+        try {
+            startTime = getSecondsFromDate(node.getDescendantByName("PublishedStartTime").getInnerText());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        try {
+            Duration duration = getDurationFromString(node.getDescendantByName("PublishedDuration").getInnerText());
+            endTime = startTime + duration.getSeconds();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        builder.setStartTime(startTime)
+                .setEndTime(endTime);
     }
 
     private class EpgRunnable implements Runnable {
@@ -214,8 +319,6 @@ public class EpgManager {
         public void onPostExecute(XmlNode epgMetadata) {
             synchronized (mLock) {
                 if (epgMetadata != null) {
-                    final List<String> minimumAgeNames = Arrays.asList("MinimumAge", "mpeg7:MinimumAge");
-                    final List<String> parentalRatingNames = Arrays.asList("ParentalRating", "mpeg7:ParentalRating");
                     List<XmlNode> scheduleEvents = epgMetadata.getDescendantsByName("ScheduleEvent");
                     List<XmlNode> programmesInfo = epgMetadata.getDescendantsByName("ProgramInformation");
                     ArrayList<Programme> programmes = new ArrayList<>();
@@ -228,59 +331,17 @@ public class EpgManager {
                                 for (XmlNode event : scheduleEvents) {
                                     XmlNode programNode = event.getDescendantByName("Program");
                                     if (programNode != null && programId.equals(programNode.getAttribute("crid"))) {
-                                        try {
-                                            long startTime = getSecondsFromDate(event.getDescendantByName("PublishedStartTime").getInnerText());
-                                            Duration duration = getDurationFromString(event.getDescendantByName("PublishedDuration").getInnerText());
-                                            builder.setStartTime(startTime);
-                                            builder.setEndTime(startTime + duration.getSeconds());
-                                        } catch (Exception e) {
-                                            e.printStackTrace();
-                                        }
+                                        findStartEndTimes(event, builder);
                                         break;
                                     }
                                 }
                             }
-                            List<XmlNode> descriptions = info.getDescendantsByName("Synopsis");
-                            for (XmlNode desc : descriptions) {
-                                switch (desc.getAttribute("length")) {
-                                    case "short":
-                                        builder.setShortDescription(desc.getInnerText());
-                                        break;
-                                    case "long":
-                                        builder.setLongDescription(desc.getInnerText());
-                                        break;
-                                    default:
-                                        builder.setMediumDescription(desc.getInnerText());
-                                        break;
-                                }
-                            }
-                            String minAge = "0";
-                            String ratingScheme = null;
-                            String explanatoryText = null;
-                            List<XmlNode> parentalGuidanceNodes = info.getDescendantsByName("ParentalGuidance");
-                            if (!parentalGuidanceNodes.isEmpty()) {
-                                XmlNode node = parentalGuidanceNodes.get(0).getFirstChild();
-                                if (node != null && minimumAgeNames.contains(node.getName())) {
-                                    minAge = node.getInnerText();
-                                    if (parentalGuidanceNodes.size() > 1) {
-                                        node = parentalGuidanceNodes.get(1).getFirstChild();
-                                        if (node != null && parentalRatingNames.contains(node.getName())) {
-                                            ratingScheme = node.getAttribute("href");
-                                            node = node.getNextSibling();
-                                            if (node != null) {
-                                                explanatoryText = node.getInnerText();
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            findDescriptions(info, builder);
+                            findParentalGuidance(info, builder);
+                            findTitle(info, builder);
 
                             programmes.add(builder
-                                    .setTitle(info.getDescendantByName("Title").getInnerText())
                                     .setProgramId(programId)
-                                    .setMinimumAge(Integer.parseInt(minAge))
-                                    .setParentalRatingScheme(ratingScheme)
-                                    .setParentalRatingDescription(explanatoryText)
                                     .build());
                         } catch (Exception e) {
                             e.printStackTrace();
