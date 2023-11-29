@@ -6,6 +6,7 @@ import static org.orbtv.dvbiclient.Utils.getSecondsFromDate;
 import android.net.Uri;
 import android.util.Log;
 
+import org.json.JSONObject;
 import org.orbtv.companionlibrary.model.Program;
 import org.orbtv.companionlibrary.utils.AsyncUtils;
 import org.orbtv.dvbiclient.model.ContentGuide;
@@ -26,6 +27,7 @@ import java.util.List;
 
 public class EpgManager {
     private static final String TAG = EpgManager.class.getSimpleName();
+    private static final long SECONDS_OF_DAY = 86400;
     private final DatabaseHandler mDbHandler;
     private final Object mLock = new Object();
     private final EpgRunnable mEpgRunnable;
@@ -45,13 +47,14 @@ public class EpgManager {
         mEpgRunnable.refreshServiceLists();
     }
 
-    public void requestUpdateFromContentGuideSourceXML(Service service, String xml) {
+    public void requestUpdateFromEventStream(Service service, JSONObject data) {
         try {
             Log.i(TAG, "requesting epg update for service with UID " + service.getUniqueIdentifier() + " from ContentGuideSourceList...");
-            XmlNode baseNode = XmlNode.parse(xml);
+            XmlNode baseNode = XmlNode.parse(data.getString("messageData"));
             if (baseNode != null) {
                 findScheduleInfoEndpoints(service, baseNode);
-                findProgramInfo(service, baseNode);
+                findProgramInfo(service, baseNode,
+                        data.has("duration") ? data.getInt("duration") : SECONDS_OF_DAY);
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -86,15 +89,15 @@ public class EpgManager {
         }
     }
 
-    private void findProgramInfo(Service service, XmlNode baseNode) {
+    private void findProgramInfo(Service service, XmlNode baseNode, long duration) {
         XmlNode node = baseNode.getDescendantByName("InstanceDescription");
         if (node != null) {
             Programme.Builder builder = new Programme.Builder();
             findDescriptions(node, builder);
             findParentalGuidance(node, builder);
             findTitle(node, builder);
-            findStartEndTimes(node, builder);
-            findProgramId(baseNode, builder, service.getUniqueIdentifier());
+            findStartEndTimes(node, builder, System.currentTimeMillis() / 1000, duration);
+            findProgramId(baseNode, builder, "crid://" + service.getUniqueIdentifier());
             mDbHandler.updateProgrammesForService(service.getUniqueIdentifier(), Arrays.asList(builder.build()));
             synchronized (mLock) {
                 for (Callback callback : mCallbacks) {
@@ -165,19 +168,17 @@ public class EpgManager {
                 .setParentalRatingDescription(explanatoryText);
     }
 
-    private void findStartEndTimes(XmlNode node, Programme.Builder builder) {
-        long startTime = System.currentTimeMillis() / 1000;
-        long endTime = startTime + 86400;
+    private void findStartEndTimes(XmlNode node, Programme.Builder builder, long fallbackStart, long fallbackDuration) {
+        long startTime = fallbackStart;
+        long endTime = startTime + fallbackDuration;
         try {
             startTime = getSecondsFromDate(node.getDescendantByName("PublishedStartTime").getInnerText());
         } catch (Exception e) {
-            e.printStackTrace();
         }
         try {
             Duration duration = getDurationFromString(node.getDescendantByName("PublishedDuration").getInnerText());
             endTime = startTime + duration.getSeconds();
         } catch (Exception e) {
-            e.printStackTrace();
         }
         builder.setStartTime(startTime)
                 .setEndTime(endTime);
@@ -223,9 +224,9 @@ public class EpgManager {
                 synchronized (mLock) {
                     long currentTimestamp = System.currentTimeMillis() / 1000;
                     for (EpgTaskInfo info : mScheduleInfos) {
-                        if (info.nextUpdate != null && info.nextUpdate <= currentTimestamp) {
-                            Log.i(TAG, "Updating EPG for Service " + info.getServiceUID());
-                            synchronized (info) {
+                        synchronized (info) {
+                            if (info.nextUpdate != null && info.nextUpdate <= currentTimestamp) {
+                                Log.i(TAG, "Updating EPG for Service " + info.getServiceUID());
                                 info.nextUpdate = null;
                                 EpgMetadataTask task = new EpgMetadataTask(info);
                                 mEpgMetadataTasks.add(task);
@@ -300,7 +301,7 @@ public class EpgManager {
                     }
                     mTaskInfo.isNowNext = false;
 
-                    if (mTaskInfo.nextUpdate != null) {
+                    if (mTaskInfo.nextUpdate == null) {
                         // TODO: update request time
                         // mTimestamp.set(connection.getHeaderField("Cache-Control"));
                         mTaskInfo.nextUpdate = System.currentTimeMillis() / 1000 + 300;
@@ -331,7 +332,7 @@ public class EpgManager {
                                 for (XmlNode event : scheduleEvents) {
                                     XmlNode programNode = event.getDescendantByName("Program");
                                     if (programNode != null && programId.equals(programNode.getAttribute("crid"))) {
-                                        findStartEndTimes(event, builder);
+                                        findStartEndTimes(event, builder, System.currentTimeMillis() / 1000, SECONDS_OF_DAY);
                                         break;
                                     }
                                 }

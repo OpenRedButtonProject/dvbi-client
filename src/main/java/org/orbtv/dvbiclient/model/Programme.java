@@ -2,6 +2,8 @@ package org.orbtv.dvbiclient.model;
 
 import android.content.ContentValues;
 
+import java.util.Objects;
+
 public class Programme {
     public static final String DB_COLUMN_TITLE = "title";
     public static final String DB_COLUMN_PROGRAM_ID = "program_id";
@@ -37,18 +39,29 @@ public class Programme {
     public String getProgramId() { return mProgramId; }
     public int getMinimumAge() { return mMinimumAge; }
 
-    public boolean equals(Programme other) {
-        return other == this || (other != null
-                && mTitle.equals(other.mTitle)
-                && mProgramId.equals(other.mProgramId)
-                && (mShortDescription == other.mShortDescription || mShortDescription.equals(other.mShortDescription))
-                && (mMediumDescription == other.mMediumDescription || mMediumDescription.equals(other.mMediumDescription))
-                && (mLongDescription == other.mLongDescription || mLongDescription.equals(other.mLongDescription))
-                && mStartTime == other.mStartTime
-                && mEndTime == other.mEndTime
-                && mMinimumAge == other.mMinimumAge
-                && (mParentalRating == other.mParentalRating || mParentalRating.equals(other.mParentalRating))
-                && (mParentalRatingDesc == other.mParentalRatingDesc || mParentalRatingDesc.equals(other.mParentalRatingDesc)));
+    @Override
+    public int hashCode() {
+        return Objects.hash(mProgramId, mTitle, mShortDescription, mMediumDescription, mLongDescription,
+                mStartTime, mEndTime, mMinimumAge, mParentalRating, mParentalRatingDesc);
+    }
+    @Override
+    public boolean equals(Object other) {
+        try {
+            Programme o = (Programme) other;
+            return other == this || (o != null
+                    && mTitle.equals(o.mTitle)
+                    && mProgramId.equals(o.mProgramId)
+                    && (mShortDescription != null && mShortDescription.equals(o.mShortDescription) || mShortDescription == o.mShortDescription) // check for null equality
+                    && (mMediumDescription != null && mMediumDescription.equals(o.mMediumDescription) || mMediumDescription == o.mMediumDescription) // check for null equality
+                    && (mLongDescription != null && mLongDescription.equals(o.mLongDescription) || mLongDescription == o.mLongDescription) // check for null equality
+                    && mStartTime == o.mStartTime
+                    && mEndTime == o.mEndTime
+                    && mMinimumAge == o.mMinimumAge
+                    && (mParentalRating != null && mParentalRating.equals(o.mParentalRating) || mParentalRating == o.mParentalRating) // check for null equality
+                    && (mParentalRatingDesc != null && mParentalRatingDesc.equals(o.mParentalRatingDesc) || mParentalRatingDesc == o.mParentalRatingDesc)); // check for null equality
+        }
+        catch (ClassCastException ignored) { }
+        return false;
     }
     @Override
     public String toString() {

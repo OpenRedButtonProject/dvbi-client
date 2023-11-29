@@ -12,13 +12,14 @@ import java.util.List;
 
 public class TunedServiceManager {
     private static final String TAG = TunedServiceManager.class.getSimpleName();
+    private static final long SECONDS_OF_DAY = 86400;
     private ArrayList<Callback> mCallbacks = new ArrayList<>();
     private TunedServiceRunnable mTunedServiceRunnable = null;
     private Thread mTunedServiceThread = null;
     private Service mTunedService = null;
     private ServiceInstance mTunedInstance = null;
     private DatabaseHandler mDbHandler;
-    private Programme mNowProgramme = null;
+    private List<Programme> mNowNextProgrammes = new ArrayList<>();
     private final Object mLock = new Object();
 
     public TunedServiceManager(EpgManager epgManager, DatabaseHandler dbHandler) {
@@ -28,7 +29,7 @@ public class TunedServiceManager {
                 if (mTunedService != null) {
                     String uid = mTunedService.getUniqueIdentifier();
                     if (serviceUIDs.contains(uid)) {
-                        updateNowProgramme();
+                        updateNowNextProgrammes();
                     }
                 }
             }
@@ -55,8 +56,8 @@ public class TunedServiceManager {
         Log.i(TAG, "---------- Tuning to service ----------\n" + service + "\n------------------------------------");
         synchronized (mLock) {
             mTunedService = service;
+            updateNowNextProgrammes();
             mTunedInstance = instance;
-            updateNowProgramme();
             for (Callback callback : mCallbacks) {
                 callback.onInstanceChanged(null, mTunedInstance);
             }
@@ -69,7 +70,7 @@ public class TunedServiceManager {
         stopTunedServiceThread();
         synchronized (mLock) {
             mTunedService = null;
-            mNowProgramme = null;
+            mNowNextProgrammes.clear();
             mTunedInstance = null;
         }
     }
@@ -90,7 +91,29 @@ public class TunedServiceManager {
 
     public synchronized Service getTunedService() { return mTunedService; }
 
-    public Programme getNowProgramme() { return mNowProgramme; }
+    public Programme getNowProgramme() {
+        long currentTime = System.currentTimeMillis() / 1000;
+        synchronized (mLock) {
+            for (Programme p : mNowNextProgrammes) {
+                if (p.getStartTime() <= currentTime && p.getEndTime() > currentTime) {
+                    return p;
+                }
+            }
+        }
+        return null;
+    }
+
+    public Programme getNextProgramme() {
+        synchronized (mLock) {
+            if (getNowProgramme() == null && !mNowNextProgrammes.isEmpty()) {
+                return mNowNextProgrammes.get(0);
+            }
+            if (mNowNextProgrammes.size() >= 2) {
+                return mNowNextProgrammes.get(1);
+            }
+        }
+        return null;
+    }
 
     public synchronized ServiceInstance getTunedInstance() { return mTunedInstance; }
 
@@ -111,17 +134,15 @@ public class TunedServiceManager {
         }
     }
     
-    private void updateNowProgramme() {
+    private void updateNowNextProgrammes() {
         long currentTime = System.currentTimeMillis() / 1000;
-        List<Programme> programmes = mDbHandler.getProgrammesForService(mTunedService.getUniqueIdentifier(), currentTime, currentTime, 1);
-        Programme programme = null;
-        if (!programmes.isEmpty()) {
-            programme = programmes.get(0);
-        }
-        if ((programme != null && !programme.equals(mNowProgramme)) || mNowProgramme != null) {
-            mNowProgramme = programme;
+        List<Programme> programmes = mDbHandler.getProgrammesForService(
+                mTunedService.getUniqueIdentifier(),
+                currentTime, currentTime + SECONDS_OF_DAY, 2);
+        if (!programmes.equals(mNowNextProgrammes)) {
+            mNowNextProgrammes = programmes;
             for (Callback callback : mCallbacks) {
-                callback.onNowProgrammeUpdated(programme);
+                callback.onNowProgrammeUpdated(getNowProgramme());
             }
         }
     }
@@ -163,8 +184,8 @@ public class TunedServiceManager {
                     return true;
                 }
                 else {
-                    long secondsOfDay = currentTimestamp % 86400;
-                    String dayOfWeek = String.valueOf((currentTimestamp / 86400 + 3) % 7 + 1); // +3 as Epoch was Thursday and +1 as Monday should be 1
+                    long secondsOfDay = currentTimestamp % SECONDS_OF_DAY;
+                    String dayOfWeek = String.valueOf((currentTimestamp / SECONDS_OF_DAY + 3) % 7 + 1); // +3 as Epoch was Thursday and +1 as Monday should be 1
                     for (AvailabilityPeriod.Interval interval : intervals) {
                         if ((interval.getDays() == null || interval.getDays().contains(dayOfWeek)) &&
                                 (interval.getStartTime() == null || secondsOfDay >= interval.getStartTime() && secondsOfDay < interval.getEndTime())) {
@@ -198,13 +219,24 @@ public class TunedServiceManager {
         @Override
         public void run() {
             ServiceInstance tunedInstance = null;
+            Programme nowProgramme = getNowProgramme();
             mIsRunning = true;
             while (mIsRunning) {
                 synchronized (mLock) {
-                    if (mNowProgramme != null) {
-                        long currentTime = System.currentTimeMillis() / 1000;
-                        if (mNowProgramme.getEndTime() < currentTime) {
-                            updateNowProgramme();
+                    Programme programme = getNowProgramme();
+                    if (nowProgramme != programme) {
+                        if (nowProgramme == null) {
+                            nowProgramme = programme;
+                            // no need to call updateNowNextProgrammes() as it will return the same
+                            // now and next programmes and the callback will not be called
+                            for (Callback callback : mCallbacks) {
+                                callback.onNowProgrammeUpdated(programme);
+                            }
+                        }
+                        else {
+                            // first update, then get a reference to the now Programme
+                            updateNowNextProgrammes();
+                            nowProgramme = getNowProgramme();
                         }
                     }
 

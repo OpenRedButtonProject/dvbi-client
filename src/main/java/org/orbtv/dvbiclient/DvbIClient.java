@@ -171,7 +171,9 @@ public class DvbIClient {
             if (mBlocked != blocked) {
                 mBlocked = blocked;
                 ServiceInstance instance = mServiceManager.getTunedInstance();
-                onInstanceChanged(instance, instance);
+                if (instance != null) {
+                    onInstanceChanged(instance, instance);
+                }
                 for (HbbTVCallback callback : mHbbTVCallbacks) {
                     callback.onParentalRatingChange(mBlocked);
                 }
@@ -394,12 +396,7 @@ public class DvbIClient {
                     }
                     break;
                 case PLAYER_EVENT_EPG_METADATA:
-                    try {
-                        mEpgManager.requestUpdateFromContentGuideSourceXML(
-                                mServiceManager.getTunedService(), data.getString("messageData"));
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
+                        mEpgManager.requestUpdateFromEventStream(mServiceManager.getTunedService(), data);
                     break;
             }
         }
