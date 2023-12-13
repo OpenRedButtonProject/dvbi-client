@@ -373,10 +373,35 @@ public class DvbIClient {
                 if (entry.getValue().equals(eventName)) {
                     try {
                         for (Callback cb : mCallbacks) {
+                            String Id = "";
+                            double startTime = -1;
+                            double duration = -1;
+                            String messageData = "";
+                            String contentEncoding = "string";
+                            if (data.has("id")) {
+                                Id = data.getString("id");
+                            }
+                            if (data.has("calculatedPresentationTime")) {
+                                startTime = data.getDouble("calculatedPresentationTime");
+                            }
+                            if (data.has("duration")) {
+                                duration = data.getDouble("duration");
+                            }
+                            if (data.has("messageData")) {
+                                messageData = data.getString("messageData");
+                            }
+                            if (data.has("contentEncoding")) {
+                                contentEncoding = data.getString("contentEncoding");
+                            }
                             cb.onDashStreamEvent(
                                     entry.getKey(),
                                     data.getJSONObject("eventStream").getString("value"),
-                                    "trigger"
+                                    "trigger",
+                                    Id,
+                                    startTime,
+                                    duration,
+                                    messageData,
+                                    contentEncoding
                             );
                         }
                     } catch (JSONException e) {
@@ -966,7 +991,8 @@ public class DvbIClient {
 
     public static class Callback {
         protected void onProcessXmlAit(String xmlAit, String scheme) { }
-        protected void onDashStreamEvent(int listenId, String name, String status) { }
+        protected void onDashStreamEvent(int listenId, String name, String status, String Id,
+                                         double startTime, double duration, String data, String contentEncoding) { }
         protected void onTracksUpdated() { }
         protected void onTrackChanged(int type, String id) { }
     }

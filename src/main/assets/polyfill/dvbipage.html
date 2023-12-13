@@ -15,7 +15,16 @@
         const PLAYER_EVENT_EPG_METADATA = "urn:dvb:iptv:cpm:2014";
 
         function _streamEventHandler(payload) {
-            Android.onVideoEvent(payload.type, JSON.stringify(payload.event));
+            const eventData = payload.event;
+            if (ArrayBuffer.isView(eventData.messageData)) {
+                const buffer = eventData.messageData;
+                eventData.contentEncoding = "arrayBuffer";
+                eventData.messageData = Array.from(buffer, byte => byte.toString(16).padStart(2, '0')).join('');
+            }
+            else {
+                eventData.contentEncoding = "string";
+            }
+            Android.onVideoEvent(payload.type, JSON.stringify(eventData));
         }
 
         function _setTrackEnabled(type, enable) {
