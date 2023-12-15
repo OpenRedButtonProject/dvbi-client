@@ -30,6 +30,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Timer;
+import java.util.TimerTask;
 
 public class DvbIClient {
     private static DvbIClient mSingleton;
@@ -70,7 +72,6 @@ public class DvbIClient {
         put(TvTrackInfo.TYPE_SUBTITLE, "text");
     }};
     private final ITvInputCallback mFallbackCallback = new ITvInputCallback();
-
     private final DvbIView mDvbIView;
     private final HashMap<Integer, String> mStreamEventsLookup = new HashMap<>();
     private ServiceListDiscoveryTask mLastDiscoveryTask = null;
@@ -79,6 +80,7 @@ public class DvbIClient {
     private final ArrayList<HbbTVCallback> mHbbTVCallbacks = new ArrayList<>();
     private final ArrayList<Callback> mCallbacks = new ArrayList<>();
     private boolean mBlocked = false; // TODO: should it be part of TunedServiceManager?
+    private String mLastState; // TODO: should it be part of TunedServiceManager?
     private List<TvTrackInfo> mTracks = new ArrayList<>(); // TODO: should it be part of TunedServiceManager?
     private HashMap<Integer, TvTrackInfo> mSelectedTracks = new HashMap<>(); // TODO: should it be part of TunedServiceManager?
     private boolean mSubtitlesEnabled = false;
@@ -87,6 +89,7 @@ public class DvbIClient {
     private final EpgManager mEpgManager;
     private final TunedServiceManager mServiceManager;
     private List<String> mUpdatedServiceEPGs = new ArrayList<>();
+    private Timer mPermanentErrorTimer;
     private final TunedServiceManager.Callback mServiceManagerCallback = new TunedServiceManager.Callback() {
         @Override
         public void onInstanceChanged(ServiceInstance fromInstance, ServiceInstance toInstance) {
@@ -105,7 +108,8 @@ public class DvbIClient {
                             if (service.getParentalRating() == null || service.getParentalRating() <= mTvInputCallback.getParentalControlAge()) {
                                 if ("dvb-dash".equals(toInstance.getDeliveryType())) {
                                     mTvInputCallback.tuneOffBroadcast();
-                                    if (mDvbIView.tune(uri, mSubtitlesEnabled)) {
+                                    if (mDvbIView.tune(uri, mSubtitlesEnabled) && !PLAYER_STATUS_STARTING.equals(mLastState)) {
+                                        mLastState = PLAYER_STATUS_STARTING;
                                         dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
                                     }
                                 } else {
@@ -130,7 +134,10 @@ public class DvbIClient {
                     } else {
                         mTvInputCallback.tuneOffBroadcast();
                         mDvbIView.tuneOff();
-                        dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
+                        if (!PLAYER_STATUS_STARTING.equals(mLastState)) {
+                            mLastState = PLAYER_STATUS_STARTING;
+                            dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
+                        }
                         mTvInputCallback.notifyVideoAvailable();
                         launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1_2), LINKED_APP_SCHEME_1_2);
                     }
@@ -145,12 +152,15 @@ public class DvbIClient {
                     mDvbIView.tuneOff();
                     channel = channelBuilder.setServiceInstance(fromInstance).build();
                     mTvInputCallback.notifyVideoAvailable();
-                    dispatchPlayerStatusChangedEvent(
-                            channel.getOnid(),
-                            channel.getTsid(),
-                            channel.getSid(),
-                            PLAYER_STATUS_STARTING
-                    );
+                    if (!PLAYER_STATUS_STARTING.equals(mLastState)) {
+                        mLastState = PLAYER_STATUS_STARTING;
+                        dispatchPlayerStatusChangedEvent(
+                                channel.getOnid(),
+                                channel.getTsid(),
+                                channel.getSid(),
+                                PLAYER_STATUS_STARTING
+                        );
+                    }
                     if (channel.getLinkedAppUri(LINKED_APP_SCHEME_2) != null) {
                         launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_2), LINKED_APP_SCHEME_2);
                     } else if (channel.getLinkedAppUri(LINKED_APP_SCHEME_1000_1) != null) {
@@ -170,6 +180,7 @@ public class DvbIClient {
             Log.i(TAG, "Now programme updated: " + programme);
             if (mBlocked != blocked) {
                 mBlocked = blocked;
+                invalidateErrorTimer();
                 ServiceInstance instance = mServiceManager.getTunedInstance();
                 if (instance != null) {
                     onInstanceChanged(instance, instance);
@@ -193,7 +204,18 @@ public class DvbIClient {
                 mTracks.clear();
                 mSelectedTracks.clear();
                 mIsUnselected.clear();
+                mLastState = PLAYER_STATUS_STARTING;
                 dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_BLOCKED);
+                invalidateErrorTimer();
+                mPermanentErrorTimer = new Timer();
+                mPermanentErrorTimer.schedule(new TimerTask() {
+                    @Override
+                    public void run() {
+                        Log.i(TAG, "Triggering permanent error state...");
+                        mLastState = PLAYER_STATUS_BLOCKED;
+                        dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_ERROR);
+                    }
+                }, 30000);
                 mTvInputCallback.tuneOffBroadcast();
             }
         }
@@ -569,6 +591,7 @@ public class DvbIClient {
     public synchronized boolean tune(String uid, int instanceIndex) {
         boolean blocked = mBlocked;
         mBlocked = false;
+        invalidateErrorTimer();
         if (mServiceManager.tune(mDbHandler.getServiceForUID(uid), instanceIndex)) {
             mTracks.clear();
             mSelectedTracks.clear();
@@ -727,6 +750,13 @@ public class DvbIClient {
             ret = true;
         }
         return ret;
+    }
+
+    private void invalidateErrorTimer() {
+        if (mPermanentErrorTimer != null) {
+            mPermanentErrorTimer.cancel();
+            mPermanentErrorTimer = null;
+        }
     }
 
     private List<Program> getProgramsForDvbChannel(DvbChannel channel, long start, long end, Integer limit) {
