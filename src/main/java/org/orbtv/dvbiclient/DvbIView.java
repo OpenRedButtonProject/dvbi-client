@@ -43,6 +43,19 @@ public class DvbIView extends WebView {
                 e.printStackTrace();
             }
         }
+
+        @JavascriptInterface
+        public void onStreamEvent(String targetUrl, String eventName, String eventData) {
+            Log.d("JavaScriptInterface", "Stream Event: " + targetUrl + ", eventName: " + eventName + ", data: " + eventData);
+            try {
+                JSONObject data = new JSONObject(eventData);
+                for(JSCallback handler : mJSCallbacks) {
+                    handler.onStreamEvent(targetUrl, eventName, data);
+                }
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+        }
     }
 
     public DvbIView(Context context) {
@@ -135,9 +148,9 @@ public class DvbIView extends WebView {
         });
     }
 
-    public void addStreamEventListener(String eventName) {
+    public void addStreamEventListener(String targetUrl, String eventName) {
         mContext.getMainExecutor().execute(() -> {
-            evaluateJavascript("orb_addStreamEventListener('" + eventName + "')", null);
+            evaluateJavascript("orb_addStreamEventListener('" + targetUrl + "','" + eventName + "')", null);
         });
     }
 
@@ -167,5 +180,6 @@ public class DvbIView extends WebView {
 
     public interface JSCallback {
         void onVideoEvent(String eventName, JSONObject data);
+        void onStreamEvent(String targetUrl, String eventName, JSONObject data);
     }
 }

@@ -73,7 +73,8 @@ public class DvbIClient {
     }};
     private final ITvInputCallback mFallbackCallback = new ITvInputCallback();
     private final DvbIView mDvbIView;
-    private final HashMap<Integer, String> mStreamEventsLookup = new HashMap<>();
+    private final HashMap<Integer, String> mStreamEventTargetsLookup = new HashMap<>();
+    private final HashMap<Integer, String> mStreamEventNamesLookup = new HashMap<>();
     private ServiceListDiscoveryTask mLastDiscoveryTask = null;
     private final DatabaseHandler mDbHandler;
     private final ArrayList<DvbCallback> mDvbCallbacks = new ArrayList<>();
@@ -117,7 +118,12 @@ public class DvbIClient {
                                     mTracks.clear();
                                     mSelectedTracks.clear();
                                     mIsUnselected.clear();
-                                    mTvInputCallback.tuneBroadcast(toInstance.getTriplet().toString());
+                                    if (toInstance.getTriplet() != null) {
+                                        mTvInputCallback.tuneBroadcast(toInstance.getTriplet().toString());
+                                    }
+                                    else {
+                                        mDvbIView.tuneOff();
+                                    }
                                 }
                             } else {
                                 Log.i(TAG, "Service is blocked by parental control.");
@@ -237,9 +243,61 @@ public class DvbIClient {
                     if (HBBTV_CHANNEL_STATUS_LOOKUP.containsKey(eventName)) {
                         handleChannelStatusChange(eventName);
                     } else {
-                        handleStreamEventDispatch(eventName, data);
+                        handleEventDispatch(eventName, data);
                     }
                     break;
+            }
+        }
+
+        @Override
+        public synchronized void onStreamEvent(String targetUrl, String eventName, JSONObject data) {
+            Log.i(TAG, "Received stream event " + targetUrl + " with eventName " + eventName);
+            try {
+                String Id = "";
+                String status = "error";
+                int startTime = -1;
+                int duration = -1;
+                int timescale = 1;
+                String messageData = "";
+                String contentEncoding = "binary";
+                if (!data.isNull("id")) {
+                    Id = data.getString("id");
+                }
+                if (!data.isNull("timescale")) {
+                    timescale = data.getInt("timescale");
+                }
+                if (!data.isNull("calculatedPresentationTime")) {
+                    startTime = (int) (data.getDouble("calculatedPresentationTime") * timescale);
+                }
+                if (!data.isNull("duration")) {
+                    duration = (int) (data.getDouble("duration") * timescale);
+                }
+                if (!data.isNull("status")) {
+                    status = data.getString("status");
+                }
+                if (!data.isNull("__orb_204data__")) {
+                    JSONObject data204 = data.getJSONObject("__orb_204data__");
+                    messageData = data204.getString("payload");
+                    contentEncoding = data204.getString("type");
+                }
+                for (Map.Entry<Integer, String> entry : mStreamEventTargetsLookup.entrySet()) {
+                    if (entry.getValue().equals(targetUrl) && eventName.equals(mStreamEventNamesLookup.get(entry.getKey()))) {
+                        for (Callback cb : mCallbacks) {
+                            cb.onDashStreamEvent(
+                                    entry.getKey(),
+                                    eventName,
+                                    status,
+                                    Id,
+                                    startTime,
+                                    duration,
+                                    messageData,
+                                    contentEncoding
+                            );
+                        }
+                    }
+                }
+            } catch (JSONException e) {
+                e.printStackTrace();
             }
         }
 
@@ -390,47 +448,7 @@ public class DvbIClient {
             }
         }
 
-        private synchronized void handleStreamEventDispatch(String eventName, JSONObject data) {
-            for (Map.Entry<Integer, String> entry : mStreamEventsLookup.entrySet()) {
-                if (entry.getValue().equals(eventName)) {
-                    try {
-                        for (Callback cb : mCallbacks) {
-                            String Id = "";
-                            double startTime = -1;
-                            double duration = -1;
-                            String messageData = "";
-                            String contentEncoding = "string";
-                            if (data.has("id")) {
-                                Id = data.getString("id");
-                            }
-                            if (data.has("calculatedPresentationTime")) {
-                                startTime = data.getDouble("calculatedPresentationTime");
-                            }
-                            if (data.has("duration")) {
-                                duration = data.getDouble("duration");
-                            }
-                            if (data.has("messageData")) {
-                                messageData = data.getString("messageData");
-                            }
-                            if (data.has("contentEncoding")) {
-                                contentEncoding = data.getString("contentEncoding");
-                            }
-                            cb.onDashStreamEvent(
-                                    entry.getKey(),
-                                    data.getJSONObject("eventStream").getString("value"),
-                                    "trigger",
-                                    Id,
-                                    startTime,
-                                    duration,
-                                    messageData,
-                                    contentEncoding
-                            );
-                        }
-                    } catch (JSONException e) {
-                        e.printStackTrace();
-                    }
-                }
-            }
+        private synchronized void handleEventDispatch(String eventName, JSONObject data) {
             switch (eventName) {
                 case PLAYER_EVENT_APP_SIGNALLING:
                     try {
@@ -443,7 +461,7 @@ public class DvbIClient {
                     }
                     break;
                 case PLAYER_EVENT_EPG_METADATA:
-                        mEpgManager.requestUpdateFromEventStream(mServiceManager.getTunedService(), data);
+                    mEpgManager.requestUpdateFromEventStream(mServiceManager.getTunedService(), data);
                     break;
             }
         }
@@ -515,18 +533,21 @@ public class DvbIClient {
     }
 
     public synchronized boolean subscribeStreamEvent(int listenId, String targetUrl, String eventName) {
+        Log.i(TAG, "Subscribe Stream event with targetUrl '" + targetUrl + "' and eventName '" + eventName + "'.");
         if (targetUrl != null) {
-            mStreamEventsLookup.put(listenId, targetUrl);
-            mDvbIView.addStreamEventListener(targetUrl);
+            mStreamEventTargetsLookup.put(listenId, targetUrl);
+            mStreamEventNamesLookup.put(listenId, eventName);
+            mDvbIView.addStreamEventListener(targetUrl, eventName);
             return true;
         }
         return false;
     }
 
     public synchronized void unsubscribeStreamEvent(int listenId) {
-        if (mStreamEventsLookup.containsKey(listenId)) {
-            mDvbIView.removeStreamEventListener(mStreamEventsLookup.get(listenId));
-            mStreamEventsLookup.remove(listenId);
+        if (mStreamEventTargetsLookup.containsKey(listenId)) {
+            mDvbIView.removeStreamEventListener(mStreamEventTargetsLookup.get(listenId));
+            mStreamEventTargetsLookup.remove(listenId);
+            mStreamEventNamesLookup.remove(listenId);
         }
     }
 
@@ -594,6 +615,8 @@ public class DvbIClient {
         invalidateErrorTimer();
         if (mServiceManager.tune(mDbHandler.getServiceForUID(uid), instanceIndex)) {
             mTracks.clear();
+            mStreamEventTargetsLookup.clear();
+            mStreamEventNamesLookup.clear();
             mSelectedTracks.clear();
             mIsUnselected.clear();
             return true;
@@ -604,7 +627,10 @@ public class DvbIClient {
     }
 
     public synchronized void tuneOff() {
+        mLastState = null;
         mServiceManager.tuneOff();
+        mStreamEventTargetsLookup.clear();
+        mStreamEventNamesLookup.clear();
         mTracks.clear();
         mSelectedTracks.clear();
         mIsUnselected.clear();
@@ -739,7 +765,7 @@ public class DvbIClient {
         if (mLastDiscoveryTask == null) {
             mLastDiscoveryTask = new ServiceListDiscoveryTask();
             if (serviceListURL == null || serviceListURL.isEmpty()) {
-                serviceListURL = "http://192.168.1.179/servicelist.xml";
+                serviceListURL = "http://192.168.1.158/servicelist.xml";
             }
             mLastDiscoveryTask = new ServiceListDiscoveryTask();
             Log.d(TAG, "Starting service search at " + serviceListURL);

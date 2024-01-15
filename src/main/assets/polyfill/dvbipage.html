@@ -10,21 +10,47 @@
         let _video;
         let _lastSource;
         let _subs;
+        let _eventStreams = { }
         const _events = { };
         const PLAYER_EVENT_APP_SIGNALLING = "urn:dvb:dash:appsignalling:2016";
         const PLAYER_EVENT_EPG_METADATA = "urn:dvb:iptv:cpm:2014";
 
+        function _onManifestLoaded(e) {
+            console.log("manifest data:", e);
+            _eventStreams = { };
+            function processEventStreams(eventStreams) {
+                if (eventStreams) {
+                    for (let eventStream of eventStreams) {
+                        let scheme = eventStream.schemeIdUri;
+                        if (!_eventStreams[scheme]) {
+                            _eventStreams[scheme] = { };
+                        }
+                        _eventStreams[scheme][eventStream.value] = true;
+                    }
+                }
+            }
+            for (let period of e.data.Period_asArray) {
+                processEventStreams(period.EventStream_asArray);
+                for (let adaptation of period.AdaptationSet_asArray) {
+                    processEventStreams(adaptation.InbandEventStream_asArray);
+                }
+            }
+            console.log("event streams", _eventStreams);
+        }
+
         function _streamEventHandler(payload) {
-            const eventData = payload.event;
-            if (ArrayBuffer.isView(eventData.messageData)) {
-                const buffer = eventData.messageData;
-                eventData.contentEncoding = "arrayBuffer";
-                eventData.messageData = Array.from(buffer, byte => byte.toString(16).padStart(2, '0')).join('');
-            }
-            else {
-                eventData.contentEncoding = "string";
-            }
-            Android.onVideoEvent(payload.type, JSON.stringify(eventData));
+            const event = payload.event;
+            const eventData = {
+                id: event.id,
+                status: "trigger",
+                timescale: event.eventStream.timescale,
+                duration: event.duration,
+                calculatedPresentationTime: event.calculatedPresentationTime,
+                __orb_204data__: event.__orb_204data__,
+            };
+            console.log("Stream event payload:", payload);
+            console.log("Stream event data:", eventData);
+            Android.onStreamEvent(event.eventStream.schemeIdUri, event.eventStream.value, JSON.stringify(eventData));
         }
 
         function _setTrackEnabled(type, enable) {
@@ -166,6 +192,8 @@
             _player.initialize(_video, undefined, true);
             _player.attachTTMLRenderingDiv(_subs);
 
+            _player.on('manifestLoaded', _onManifestLoaded);
+
             _player.on(orb_dashjs.MediaPlayer.events.PLAYBACK_PLAYING, function(e) {
                 Android.onVideoEvent('DVBI_PLAYBACK_PLAYING', JSON.stringify(e));
             });
@@ -210,7 +238,7 @@
                         return _getTrackDataFromMediaInfo(track, track === curText);
                     }).filter(track => track !== undefined)
                 };
-                console.log(tracks);
+                console.log("tracks:", tracks);
                 Android.onVideoEvent('DVBI_TRACKS_UPDATED', JSON.stringify(tracks));
             }
             _player.on('periodSwitchCompleted', updateTracks);
@@ -254,26 +282,30 @@
             }
         }
 
-        function orb_addStreamEventListener(eventName) {
-            if (eventName !== PLAYER_EVENT_APP_SIGNALLING && eventName !== PLAYER_EVENT_EPG_METADATA) {
-                if (!_events[eventName]) {
-                    _events[eventName] = 1;
-                    _player.on(eventName, _streamEventHandler);
+        function orb_addStreamEventListener(targetUrl, eventName) {
+            if (targetUrl !== PLAYER_EVENT_APP_SIGNALLING && targetUrl !== PLAYER_EVENT_EPG_METADATA) {
+                if (!_events[targetUrl]) {
+                    _events[targetUrl] = 1;
+                    _player.on(targetUrl, _streamEventHandler);
                 }
                 else {
-                    _events[eventName]++;
+                    _events[targetUrl]++;
                 }
-                console.log("Added event listener for event " + eventName);
+                if (eventName !== "null" && !(_eventStreams[targetUrl] && _eventStreams[targetUrl][eventName])) {
+                    console.warn("Stream event with target url '" + targetUrl + "' and name '" + eventName + "' is not present in the manifest.");
+                    Android.onStreamEvent(targetUrl, eventName, JSON.stringify({ status: "error" }));
+                }
+                console.log("Added event listener for event " + targetUrl);
             }
         }
 
-        function orb_removeStreamEventListener(eventName) {
-            if (_events[eventName]) {
-                _events[eventName]--;
-                if (_events[eventName] <= 0) {
-                    _player.off(eventName, _streamEventHandler);
+        function orb_removeStreamEventListener(targetUrl) {
+            if (_events[targetUrl]) {
+                _events[targetUrl]--;
+                if (_events[targetUrl] <= 0) {
+                    _player.off(targetUrl, _streamEventHandler);
                 }
-                console.log("Removed event listener for event " + eventName);
+                console.log("Removed event listener for event " + targetUrl);
             }
         }
 
