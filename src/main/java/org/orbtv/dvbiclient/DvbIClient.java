@@ -73,8 +73,7 @@ public class DvbIClient {
     }};
     private final ITvInputCallback mFallbackCallback = new ITvInputCallback();
     private final DvbIView mDvbIView;
-    private final HashMap<Integer, String> mStreamEventTargetsLookup = new HashMap<>();
-    private final HashMap<Integer, String> mStreamEventNamesLookup = new HashMap<>();
+    private final HashMap<Integer, StreamEventInfo> mStreamEventsLookup = new HashMap<>();
     private ServiceListDiscoveryTask mLastDiscoveryTask = null;
     private final DatabaseHandler mDbHandler;
     private final ArrayList<DvbCallback> mDvbCallbacks = new ArrayList<>();
@@ -280,8 +279,8 @@ public class DvbIClient {
                     messageData = data204.getString("payload");
                     contentEncoding = data204.getString("type");
                 }
-                for (Map.Entry<Integer, String> entry : mStreamEventTargetsLookup.entrySet()) {
-                    if (entry.getValue().equals(targetUrl) && eventName.equals(mStreamEventNamesLookup.get(entry.getKey()))) {
+                for (Map.Entry<Integer, StreamEventInfo> entry : mStreamEventsLookup.entrySet()) {
+                    if (targetUrl.equals(entry.getValue().targetUrl) && eventName.equals(entry.getValue().eventName)) {
                         for (Callback cb : mCallbacks) {
                             cb.onDashStreamEvent(
                                     entry.getKey(),
@@ -535,8 +534,7 @@ public class DvbIClient {
     public synchronized boolean subscribeStreamEvent(int listenId, String targetUrl, String eventName) {
         Log.i(TAG, "Subscribe Stream event with targetUrl '" + targetUrl + "' and eventName '" + eventName + "'.");
         if (targetUrl != null) {
-            mStreamEventTargetsLookup.put(listenId, targetUrl);
-            mStreamEventNamesLookup.put(listenId, eventName);
+            mStreamEventsLookup.put(listenId, new StreamEventInfo(targetUrl, eventName));
             mDvbIView.addStreamEventListener(targetUrl, eventName);
             return true;
         }
@@ -544,10 +542,9 @@ public class DvbIClient {
     }
 
     public synchronized void unsubscribeStreamEvent(int listenId) {
-        if (mStreamEventTargetsLookup.containsKey(listenId)) {
-            mDvbIView.removeStreamEventListener(mStreamEventTargetsLookup.get(listenId));
-            mStreamEventTargetsLookup.remove(listenId);
-            mStreamEventNamesLookup.remove(listenId);
+        if (mStreamEventsLookup.containsKey(listenId)) {
+            mDvbIView.removeStreamEventListener(mStreamEventsLookup.get(listenId).targetUrl);
+            mStreamEventsLookup.remove(listenId);
         }
     }
 
@@ -615,8 +612,7 @@ public class DvbIClient {
         invalidateErrorTimer();
         if (mServiceManager.tune(mDbHandler.getServiceForUID(uid), instanceIndex)) {
             mTracks.clear();
-            mStreamEventTargetsLookup.clear();
-            mStreamEventNamesLookup.clear();
+            mStreamEventsLookup.clear();
             mSelectedTracks.clear();
             mIsUnselected.clear();
             return true;
@@ -629,8 +625,7 @@ public class DvbIClient {
     public synchronized void tuneOff() {
         mLastState = null;
         mServiceManager.tuneOff();
-        mStreamEventTargetsLookup.clear();
-        mStreamEventNamesLookup.clear();
+        mStreamEventsLookup.clear();
         mTracks.clear();
         mSelectedTracks.clear();
         mIsUnselected.clear();
@@ -989,6 +984,15 @@ public class DvbIClient {
                     cb.onProcessXmlAit(result.xml, result.scheme);
                 }
             }
+        }
+    }
+
+    private static class StreamEventInfo {
+        public String targetUrl;
+        public String eventName;
+        public StreamEventInfo(String targetUrl, String eventName) {
+            this.targetUrl = targetUrl;
+            this.eventName = eventName;
         }
     }
 
