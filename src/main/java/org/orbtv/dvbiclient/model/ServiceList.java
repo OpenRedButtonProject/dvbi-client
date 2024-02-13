@@ -14,7 +14,7 @@ public class ServiceList {
     public static final String DB_COLUMN_PROVIDER = "provider";
     public static final String DB_COLUMN_UID = "uid";
     private String mUID;
-    private List<Service> mServices;
+    private List<Service> mServices = new ArrayList<>();
     private List<LCNTable> mLCNTables = new ArrayList<>();
     private List<ContentGuide> mContentGuideSources = new ArrayList<>();
     //rest of the members

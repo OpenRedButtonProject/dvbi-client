@@ -245,18 +245,18 @@ public class DatabaseHandler extends SQLiteOpenHelper {
         }
         if (!uids.isEmpty()) {
             uids = uids.substring(1); // remove leading comma
-            Log.i(TAG, "Deleting service and instances with UIDs not in " + uids);
-            db.delete(SERVICES_TABLE, Service.DB_COLUMN_UNIQUE_IDENTIFIER + " NOT IN (" + uids + ")", null);
-            db.delete(SERVICE_INSTANCES_TABLE, COLUMN_FOREIGN_KEY + " NOT IN (" + uids + ")", null);
-            db.delete(SERVICE_NAMES_TABLE, COLUMN_FOREIGN_KEY + " NOT IN (" + uids + ")", null);
-            db.delete(PROGRAMMES_TABLE, COLUMN_FOREIGN_KEY + " NOT IN (" + uids + ")", null);
-            // TODO: delete related materials for non-existent services/instances
         }
+        Log.i(TAG, "Deleting service and instances with UIDs not in " + uids);
+        db.delete(SERVICES_TABLE, Service.DB_COLUMN_UNIQUE_IDENTIFIER + " NOT IN (" + uids + ")", null);
+        db.delete(SERVICE_INSTANCES_TABLE, COLUMN_FOREIGN_KEY + " NOT IN (" + uids + ")", null);
+        db.delete(SERVICE_NAMES_TABLE, COLUMN_FOREIGN_KEY + " NOT IN (" + uids + ")", null);
+        db.delete(PROGRAMMES_TABLE, COLUMN_FOREIGN_KEY + " NOT IN (" + uids + ")", null);
+        // TODO: delete related materials for non-existent services/instances
         if (!cgsids.isEmpty()) {
             cgsids = cgsids.substring(1); // remove leading comma
-            Log.i(TAG, "Deleting content guides with CGSIDs not in " + cgsids);
-            db.delete(CONTENT_GUIDES_TABLE, ContentGuide.DB_COLUMN_CGSID + " NOT IN (" + cgsids + ")", null);
         }
+        Log.i(TAG, "Deleting content guides with CGSIDs not in " + cgsids);
+        db.delete(CONTENT_GUIDES_TABLE, ContentGuide.DB_COLUMN_CGSID + " NOT IN (" + cgsids + ")", null);
     }
 
     public synchronized void updateProgrammesForService(String serviceUID, List<Programme> programmes) {
