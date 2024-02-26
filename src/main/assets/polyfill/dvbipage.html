@@ -283,7 +283,7 @@
         }
 
         function orb_addStreamEventListener(targetUrl, eventName) {
-            if (targetUrl !== PLAYER_EVENT_APP_SIGNALLING && targetUrl !== PLAYER_EVENT_EPG_METADATA) {
+            if (targetUrl !== PLAYER_EVENT_EPG_METADATA) {
                 if (!_events[targetUrl]) {
                     _events[targetUrl] = 1;
                     _player.on(targetUrl, _streamEventHandler);
