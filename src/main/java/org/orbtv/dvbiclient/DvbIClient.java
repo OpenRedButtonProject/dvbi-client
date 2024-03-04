@@ -610,6 +610,7 @@ public class DvbIClient {
         boolean blocked = mBlocked;
         mBlocked = false;
         invalidateErrorTimer();
+        mLastState = null;
         if (mServiceManager.tune(mDbHandler.getServiceForUID(uid), instanceIndex)) {
             mTracks.clear();
             mStreamEventsLookup.clear();
