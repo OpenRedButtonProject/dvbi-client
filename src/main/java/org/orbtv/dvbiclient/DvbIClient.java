@@ -382,7 +382,7 @@ public class DvbIClient {
                 String language = track.getString("lang");
                 String trackId = (track.getInt("id") + ":" + language);
                 builder = new TvTrackInfo.Builder(trackType, trackId)
-                        .setLanguage(new Locale(language).getISO3Language())
+                        .setLanguage(language)
                         .setEncrypted(!track.isNull("contentProtection"))
                         .setEncoding(track.getString("mimeType"));
                 switch (trackType) {
