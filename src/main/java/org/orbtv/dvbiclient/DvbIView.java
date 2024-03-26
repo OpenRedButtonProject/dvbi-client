@@ -21,6 +21,8 @@ public class DvbIView extends WebView {
     private boolean mSubsEnabled = false;
     private Boolean mPageLoaded = false;
     private Boolean mIsSuspended = false;
+    private int mViewWidth = 0; // Await onLayoutChange to calculate View width
+    private int mAppWidth = 1280; // Apps are 1280 by default
 
     private final ArrayList<JSCallback> mJSCallbacks = new ArrayList<>();
 
@@ -65,8 +67,26 @@ public class DvbIView extends WebView {
         setBackgroundColor(Color.TRANSPARENT);
         getSettings().setJavaScriptEnabled(true);
         getSettings().setMediaPlaybackRequiresUserGesture(false);
-        getSettings().setUseWideViewPort(true);
         getSettings().setLoadWithOverviewMode(true);
+
+        /**
+         * Disable support for the 'viewport' HTML meta tag to ensure that the layout width is
+         * always equal to the WebView View's width. The initial scale is determined based on this
+         * width, to scale the 1280x720 app to fit the WebView.
+         */
+        getSettings().setUseWideViewPort(false);
+        addOnLayoutChangeListener(new OnLayoutChangeListener() {
+            @Override
+            public void onLayoutChange(View v, int left, int top, int right, int bottom,
+                    int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                int width = right - left;
+                if (width != mViewWidth) {
+                    mViewWidth = width;
+                    updateScale();
+                }
+            }
+        });
+
 
         final JavaScriptInterface jsInterface = new JavaScriptInterface(mContext);
         addJavascriptInterface(jsInterface, "Android");
@@ -82,12 +102,6 @@ public class DvbIView extends WebView {
                     }
                 }
             }
-
-            @Override
-            public void onScaleChanged(WebView view, float oldScale, float newScale) {
-                DvbIView.this.setInitialScale((int) (DvbIView.this.getHeight() / 720.0 * 100.0));
-            }
-
         });
     }
 
@@ -176,6 +190,17 @@ public class DvbIView extends WebView {
                 });
             }
         }
+    }
+
+    private void updateScale() {
+        mContext.getMainExecutor().execute(() -> {
+            int scale = 100;
+            if (mViewWidth != 0) {
+                scale = (mViewWidth * 100) / mAppWidth;
+            }
+            Log.d(TAG, "Set scale to " + scale);
+            setInitialScale(scale);
+        });
     }
 
     public interface JSCallback {
