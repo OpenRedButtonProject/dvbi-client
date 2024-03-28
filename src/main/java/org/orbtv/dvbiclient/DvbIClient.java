@@ -384,7 +384,7 @@ public class DvbIClient {
                 builder = new TvTrackInfo.Builder(trackType, trackId)
                         .setLanguage(language)
                         .setEncrypted(!track.isNull("contentProtection"))
-                        .setEncoding(track.getString("mimeType"));
+                        .setEncoding(track.getString("encoding"));
                 switch (trackType) {
                     case TvTrackInfo.TYPE_AUDIO:
                         if ("descriptions".equals(track.getString("kind"))) {

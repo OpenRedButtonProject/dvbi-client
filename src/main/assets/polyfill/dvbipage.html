@@ -86,14 +86,60 @@
             return result;
         }
 
-        function _getTrackDataFromMediaInfo(mediaInfo, isSelected) {
+        function _getTrackDataFromMediaInfo(mediaInfo, isSelected, currentRep) {
+            function extractEncoding() {
+                function isMPEG4HEAAC(codecString) {
+                    if (codecString) {
+                        const parts = codecString.split('.');
+                        if (parts.length >= 3) {
+                            const codecFamily = parts[0];
+                            const mpeg4Audio = parts[1];
+                            const objectType = parts[2].padStart(2 ,'0');
+                            if (codecFamily === 'mp4a' && mpeg4Audio === '40') {
+                                const heAacTypes = ['02', '05', '29']; // common HE-AAC object types for MPEG-4
+                                return heAacTypes.includes(objectType);
+                            }
+                        }
+                    }
+                    return false;
+                }
+                function isEAC3(codecString) {
+                    if (codecString) {
+                        const eac3Identifiers = ['ec-3', 'dd+', 'ddp', 'e-ac-3']; // common identifiers for E-AC-3
+                        const normalizedCodecString = codecString.toLowerCase();
+                        return eac3Identifiers.includes(normalizedCodecString);
+                    }
+                    return false;
+                }
+                function isAVC(codecString) {
+                    if(codecString) {
+                        const parts = codecString.split('.');
+                        if (parts[0].toLowerCase() === 'avc1') {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+
+                let trackEncoding = mediaInfo.codec ? mediaInfo.codec.split('"')[1] : undefined
+                if (isMPEG4HEAAC(trackEncoding)) {
+                    trackEncoding = "HEAAC";
+                } else if (isEAC3(trackEncoding)) {
+                    trackEncoding = "E-AC3";
+                } else if(isAVC(trackEncoding) && currentRep) {
+                    trackEncoding = "AVC_" + (parseInt(currentRep.width, 10) >= 720 ? "HD_" : "SD_") + currentRep.frameRate;
+                }
+
+                return trackEncoding ? trackEncoding : mediaInfo.mimeType;
+            }
+
             let result = {
                 type: mediaInfo.type,
                 selected: isSelected,
                 lang: mediaInfo.lang,
                 id: mediaInfo.id,
                 contentProtection: mediaInfo.contentProtection,
-                mimeType: mediaInfo.mimeType
+                encoding: extractEncoding()
             };
             function extractKindFromVideoTrack() {
                 if (mediaInfo.roles) {
@@ -227,15 +273,46 @@
                 const curAudio = _player.getCurrentTrackFor('audio');
                 const curVideo = _player.getCurrentTrackFor('video');
                 const curText = _player.getCurrentTrackFor('text');
+                const streamInfo = _player.getActiveStream().getStreamInfo();
+                const dashAdapter = _player.getDashAdapter();
+                const dashMetrics = _player.getDashMetrics();
+                let currentVideoRep = null, currentAudioRep = null, currentTextRep = null;
+                if (streamInfo) {
+                    const periodIdx = streamInfo.index;
+                    const videoAdaptation = dashAdapter.getAdaptationForType(periodIdx, 'video', streamInfo);
+                    const videoRepSwitch = dashMetrics.getCurrentRepresentationSwitch('video', true);
+                    if (videoAdaptation && videoRepSwitch) {
+                        currentVideoRep = videoAdaptation.Representation_asArray.find(function (rep) {
+                            return rep.id === videoRepSwitch.to
+                        });
+                    }
+                    const audioAdaptation = dashAdapter.getAdaptationForType(periodIdx, 'audio', streamInfo);
+                    const audioRepSwitch = dashMetrics.getCurrentRepresentationSwitch('audio', true);
+                    if (audioAdaptation && audioRepSwitch) {
+                        currentAudioRep = audioAdaptation.Representation_asArray.find(function (rep) {
+                            return rep.id === audioRepSwitch.to
+                        });
+                    }
+                    const textAdaptation = dashAdapter.getAdaptationForType(periodIdx, 'text', streamInfo);
+                    const textRepSwitch = dashMetrics.getCurrentRepresentationSwitch('text', true);
+                    if (textAdaptation && textRepSwitch) {
+                        currentTextRep = textAdaptation.Representation_asArray.find(function (rep) {
+                            return rep.id === textRepSwitch.to
+                        });
+                    }
+                }
+                //console.log(JSON.stringify(currentVideoRep));
+                //console.log(JSON.stringify(currentAudioRep));
+                //console.log(JSON.stringify(currentTextRep));
                 var tracks = {
                     audio: _player.getTracksFor('audio').map(track => {
-                        return _getTrackDataFromMediaInfo(track, track === curAudio);
+                        return _getTrackDataFromMediaInfo(track, track === curAudio, currentAudioRep);
                     }).filter(track => track !== undefined),
                     video: _player.getTracksFor('video').map(track => {
-                        return _getTrackDataFromMediaInfo(track, track === curVideo);
+                        return _getTrackDataFromMediaInfo(track, track === curVideo, currentVideoRep);
                     }).filter(track => track !== undefined),
                     text: _player.getTracksFor('text').map(track => {
-                        return _getTrackDataFromMediaInfo(track, track === curText);
+                        return _getTrackDataFromMediaInfo(track, track === curText, currentTextRep);
                     }).filter(track => track !== undefined)
                 };
                 console.log("tracks:", tracks);
