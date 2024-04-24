@@ -792,6 +792,16 @@ public class DvbIClient {
         return false;
     }
 
+    public void launchBackwardsEpgApp() {
+       Programme programme = mServiceManager.getNowProgramme();
+       if (programme != null) {
+           String onDemandUrl = programme.getOnDemandURL();
+           if (onDemandUrl != null && !onDemandUrl.isEmpty()) {
+               new GetXmlAitTask().execute(new XmlAitAttributes(onDemandUrl, LINKED_APP_SCHEME_1_1 + "?lloc=epg"));
+           }
+       }
+    }
+
     private void invalidateErrorTimer() {
         if (mPermanentErrorTimer != null) {
             mPermanentErrorTimer.cancel();

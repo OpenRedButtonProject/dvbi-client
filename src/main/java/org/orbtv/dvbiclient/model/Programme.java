@@ -15,6 +15,7 @@ public class Programme {
     public static final String DB_COLUMN_MINIMUM_AGE = "minimum_age";
     public static final String DB_COLUMN_PARENTAL_RATING = "parental_rating";
     public static final String DB_COLUMN_PARENTAL_RATING_DESC = "parental_rating_desc";
+    public static final String DB_COLUMN_ON_DEMAND_URL = "on_demand_url";
     private String mParentalRating;
     private String mParentalRatingDesc;
     private int mMinimumAge;
@@ -25,6 +26,7 @@ public class Programme {
     private String mLongDescription;
     private long mStartTime;
     private long mEndTime;
+    private String mOnDemandURL;
 
     private Programme() { }
 
@@ -38,11 +40,12 @@ public class Programme {
     public long getEndTime() { return mEndTime; }
     public String getProgramId() { return mProgramId; }
     public int getMinimumAge() { return mMinimumAge; }
+    public String getOnDemandURL() {return mOnDemandURL; }
 
     @Override
     public int hashCode() {
         return Objects.hash(mProgramId, mTitle, mShortDescription, mMediumDescription, mLongDescription,
-                mStartTime, mEndTime, mMinimumAge, mParentalRating, mParentalRatingDesc);
+                mStartTime, mEndTime, mMinimumAge, mParentalRating, mParentalRatingDesc, mOnDemandURL);
     }
     @Override
     public boolean equals(Object other) {
@@ -58,7 +61,8 @@ public class Programme {
                     && mEndTime == o.mEndTime
                     && mMinimumAge == o.mMinimumAge
                     && (mParentalRating != null && mParentalRating.equals(o.mParentalRating) || mParentalRating == o.mParentalRating) // check for null equality
-                    && (mParentalRatingDesc != null && mParentalRatingDesc.equals(o.mParentalRatingDesc) || mParentalRatingDesc == o.mParentalRatingDesc)); // check for null equality
+                    && (mParentalRatingDesc != null && mParentalRatingDesc.equals(o.mParentalRatingDesc) || mParentalRatingDesc == o.mParentalRatingDesc) // check for null equality
+                    && (mOnDemandURL != null && mOnDemandURL.equals(o.mOnDemandURL) || mOnDemandURL == o.mOnDemandURL)); // check for null equality
         }
         catch (ClassCastException ignored) { }
         return false;
@@ -76,6 +80,7 @@ public class Programme {
                 + ", mMinimumAge: " + mMinimumAge
                 + ", mParentalRating: " + mParentalRating
                 + ", mParentalRatingDesc: " + mParentalRatingDesc
+                + ", mOnDemandURL: " + mOnDemandURL
                 + " }";
     }
 
@@ -91,6 +96,7 @@ public class Programme {
         values.put(Programme.DB_COLUMN_MINIMUM_AGE, mMinimumAge);
         values.put(Programme.DB_COLUMN_START_TIME, mStartTime);
         values.put(Programme.DB_COLUMN_END_TIME, mEndTime);
+        values.put(Programme.DB_COLUMN_ON_DEMAND_URL, mOnDemandURL);
         return values;
     }
 
@@ -151,6 +157,11 @@ public class Programme {
             return this;
         }
 
+        public Programme.Builder setOnDemandURL(String value) {
+            mInstance.mOnDemandURL = value;
+            return this;
+        }
+
         public Programme build() {
             Programme instance = new Programme();
             instance.mParentalRating = mInstance.mParentalRating;
@@ -163,6 +174,7 @@ public class Programme {
             instance.mLongDescription = mInstance.mLongDescription;
             instance.mStartTime = mInstance.mStartTime;
             instance.mEndTime = mInstance.mEndTime;
+            instance.mOnDemandURL = mInstance.mOnDemandURL;
             return instance;
         }
     }

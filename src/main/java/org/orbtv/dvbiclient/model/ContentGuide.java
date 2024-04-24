@@ -21,6 +21,7 @@ import java.io.BufferedReader;
 public class ContentGuide {
     public static final String DB_COLUMN_CGSID = "cgsid";
     public static final String DB_COLUMN_SCHEDULE_INFO_URI = "schedule_info_uri";
+    public static final String DB_COLUMN_PROGRAM_INFO_URI = "program_info_uri";
     private String mProviderName;
     private String mCGSID;
     private String mScheduleInfoEndpointURI;
@@ -31,6 +32,8 @@ public class ContentGuide {
     public String getCGSID() { return mCGSID; }
 
     public String getScheduleInfoEndpointURI() { return mScheduleInfoEndpointURI; }
+
+    public String getProgramInfoEndpointURI() { return mProgramInfoEndpointURI; }
 
     @Override
     public String toString() {
@@ -46,6 +49,7 @@ public class ContentGuide {
         ContentValues values = new ContentValues();
         values.put(ContentGuide.DB_COLUMN_CGSID, mCGSID);
         values.put(ContentGuide.DB_COLUMN_SCHEDULE_INFO_URI, mScheduleInfoEndpointURI);
+        values.put(ContentGuide.DB_COLUMN_PROGRAM_INFO_URI, mProgramInfoEndpointURI);
         return values;
     }
 

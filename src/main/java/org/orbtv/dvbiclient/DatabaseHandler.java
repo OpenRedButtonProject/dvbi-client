@@ -20,7 +20,7 @@ import java.util.Map;
 
 public class DatabaseHandler extends SQLiteOpenHelper {
     private static final String TAG = DatabaseHandler.class.getSimpleName();
-    private static final int DB_VERSION = 27;
+    private static final int DB_VERSION = 30;
     private static final String DB_NAME = "dvbi_db";
     private static final String FOREIGN_KEY_PREFIX_SERVICE = "service_";
     private static final String FOREIGN_KEY_PREFIX_INSTANCE = "instance_";
@@ -56,7 +56,8 @@ public class DatabaseHandler extends SQLiteOpenHelper {
         db.execSQL("CREATE TABLE " + CONTENT_GUIDES_TABLE + " ("
                 + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
                 + ContentGuide.DB_COLUMN_CGSID + " TEXT NOT NULL UNIQUE, "
-                + ContentGuide.DB_COLUMN_SCHEDULE_INFO_URI + " TEXT)"
+                + ContentGuide.DB_COLUMN_SCHEDULE_INFO_URI + " TEXT, "
+                + ContentGuide.DB_COLUMN_PROGRAM_INFO_URI + " TEXT)"
         );
         db.execSQL("CREATE TABLE " + SERVICES_TABLE + " ("
                 + COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
@@ -119,7 +120,8 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                 + Programme.DB_COLUMN_END_TIME + " INTEGER NOT NULL, "
                 + Programme.DB_COLUMN_MINIMUM_AGE + " INTEGER, "
                 + Programme.DB_COLUMN_PARENTAL_RATING + " TEXT, "
-                + Programme.DB_COLUMN_PARENTAL_RATING_DESC + " TEXT)"
+                + Programme.DB_COLUMN_PARENTAL_RATING_DESC + " TEXT, "
+                + Programme.DB_COLUMN_ON_DEMAND_URL + " TEXT)"
         );
     }
 
@@ -277,7 +279,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
         String[] projection = { Programme.DB_COLUMN_TITLE, Programme.DB_COLUMN_SHORT_DESCRIPTION, Programme.DB_COLUMN_MEDIUM_DESCRIPTION,
                 Programme.DB_COLUMN_LONG_DESCRIPTION, Programme.DB_COLUMN_PARENTAL_RATING, Programme.DB_COLUMN_START_TIME,
                 Programme.DB_COLUMN_END_TIME, Programme.DB_COLUMN_PROGRAM_ID, Programme.DB_COLUMN_MINIMUM_AGE,
-                Programme.DB_COLUMN_PARENTAL_RATING_DESC };
+                Programme.DB_COLUMN_PARENTAL_RATING_DESC, Programme.DB_COLUMN_ON_DEMAND_URL };
         String start = String.valueOf(startTime);
         String end = String.valueOf(endTime);
         String[] selectionArgs = { serviceUID, start, start, end, end, start, end, limit.toString() };
@@ -305,6 +307,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                             .setProgramId(cursor.getString(7))
                             .setMinimumAge(cursor.getInt(8))
                             .setParentalRatingDescription(cursor.getString(9))
+                            .setOnDemandURL(cursor.getString(10))
                             .build());
                 }
             }
@@ -369,7 +372,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
     private ContentGuide getContendGuideForCGSID(SQLiteDatabase db, String cgsid) {
         ContentGuide guide = null;
         if (cgsid != null) {
-            String[] projection = { ContentGuide.DB_COLUMN_SCHEDULE_INFO_URI };
+            String[] projection = { ContentGuide.DB_COLUMN_SCHEDULE_INFO_URI, ContentGuide.DB_COLUMN_PROGRAM_INFO_URI };
             Cursor cursor = null;
             try
             {
@@ -380,6 +383,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                     guide = new ContentGuide.Builder()
                             .setCGSID(cgsid)
                             .setScheduleInfoEndpointURI(cursor.getString(0))
+                            .setProgramInfoEndpointURI(cursor.getString(1))
                             .build();
                 }
             }

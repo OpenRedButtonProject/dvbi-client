@@ -55,6 +55,7 @@ public class EpgManager {
                 findScheduleInfoEndpoints(service, baseNode);
                 findProgramInfo(service, baseNode,
                         data.has("duration") ? data.getInt("duration") : SECONDS_OF_DAY);
+                //TODO find ProgramInfoEndpoint too in events (if any)
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -80,11 +81,17 @@ public class EpgManager {
         for (XmlNode cgs : contentGuideSources) {
             if (service.getContentGuide() != null && service.getContentGuide().getCGSID().equals(cgs.getAttribute("CGSID"))) {
                 List<XmlNode> uris = cgs.getDescendantsByName("URI");
+                Uri programInfoEndpoint = null;
+                Uri scheduleInfoEndpoint = null;
                 for (XmlNode uri : uris) {
+                    if ("ProgramInfoEndpoint".equals(uri.getParentNode().getName())) {
+                        programInfoEndpoint = Uri.parse(uri.getInnerText());
+                    }
                     if ("ScheduleInfoEndpoint".equals(uri.getParentNode().getName())) {
-                        new EpgMetadataTask(new EpgTaskInfo(service.getUniqueIdentifier(), Uri.parse(uri.getInnerText()))).execute();
+                        scheduleInfoEndpoint = Uri.parse(uri.getInnerText());
                     }
                 }
+                new EpgMetadataTask(new EpgTaskInfo(service.getUniqueIdentifier(), scheduleInfoEndpoint, programInfoEndpoint)).execute();
             }
         }
     }
@@ -184,6 +191,23 @@ public class EpgManager {
                 .setEndTime(endTime);
     }
 
+    private void findOnDemandProgram(XmlNode programDescriptionNode, XmlNode scheduleNode, String programId, Programme.Builder builder) {
+        long startTimeFromScheduleNode = 0;
+        long startTimeFromProgramLocationNode = 0;
+        List <XmlNode> onDemandMetadata = programDescriptionNode.getDescendantsByName("OnDemandProgram");
+        for (XmlNode OnDemandnode : onDemandMetadata) {
+            XmlNode programURLNode = OnDemandnode.getDescendantByName("ProgramURL");
+            XmlNode programNode = OnDemandnode.getDescendantByName("Program");
+            if (programURLNode != null && programNode != null && programId.equals(programNode.getAttribute("crid"))) {
+                if (programURLNode.getAttribute("contentType").equals("application/vnd.dvb.ait+xml")) {
+                    builder.setOnDemandURL(programURLNode.getInnerText());
+                }
+                //TODO: handle Start(end)OfAvailability and duration time for ondemand hbbtv apps
+                break;
+            }
+        }
+    }
+
     private class EpgRunnable implements Runnable {
         private final ArrayList<EpgTaskInfo> mScheduleInfos = new ArrayList<>();
 
@@ -206,10 +230,17 @@ public class EpgManager {
                                 serviceRef = uid;
                             }
                             if (!serviceRef.isEmpty()) {
-                                Uri baseUri = Uri.parse(guide.getScheduleInfoEndpointURI());
-                                Uri.Builder builder = baseUri.buildUpon();
+                                Uri baseUriSchedule = Uri.parse(guide.getScheduleInfoEndpointURI());
+                                Uri.Builder builder = baseUriSchedule.buildUpon();
                                 builder.appendQueryParameter("sid", uid);
-                                mScheduleInfos.add(new EpgTaskInfo(uid, builder.build()));
+
+                                Uri baseUriProgram = null;
+                                String ProgramInfoEndpointURI =  guide.getProgramInfoEndpointURI();
+                                if (ProgramInfoEndpointURI != null && !ProgramInfoEndpointURI.isEmpty()) {
+                                    baseUriProgram = Uri.parse(ProgramInfoEndpointURI);
+                                }
+
+                                mScheduleInfos.add(new EpgTaskInfo(uid, builder.build(), baseUriProgram));
                                 mScheduleInfos.get(mScheduleInfos.size() - 1).nextUpdate = currentTime;
                             }
                         }
@@ -245,7 +276,7 @@ public class EpgManager {
         }
     }
 
-    private class EpgMetadataTask extends AsyncUtils<XmlNode, Void> {
+    private class EpgMetadataTask extends AsyncUtils<ArrayList<Programme>, Void> {
         private static final long EPG_INTERVAL = 10800;
         private final EpgTaskInfo mTaskInfo;
 
@@ -253,49 +284,58 @@ public class EpgManager {
             mTaskInfo = taskInfo;
         }
 
+        private XmlNode fetchDataFromUri(URL url) throws IOException {
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            boolean useHttps = false;
+            try {
+//                if (useHttps) {
+//                    // Configure the SSL context for HTTPS connections
+//                    SSLContext sslContext = SSLContext.getInstance("TLS");
+//                    sslContext.init(null, new TrustManager[]{new TrustAllManager()}, null);
+//                    ((HttpsURLConnection) connection).setSSLSocketFactory(sslContext.getSocketFactory());
+//                    ((HttpsURLConnection) connection).setHostnameVerifier((hostname, session) -> true);
+//                }
+                connection.setRequestMethod("GET");
+                connection.setRequestProperty("Content-Type", "application/xml");
+                InputStream inputStream = connection.getInputStream();
+                BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
+                StringBuilder responseBuilder = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    responseBuilder.append(line);
+                }
+                reader.close();
+
+                Log.d(TAG, "fetchDataFromUri response: " + responseBuilder.toString());
+                return XmlNode.parse(responseBuilder.toString());
+            } catch (Exception e) {
+                    Log.e(TAG, "error", e);
+            } finally {
+                connection.disconnect();
+            }
+            return null;
+        }
+
         @Override
-        protected XmlNode doInBackground(Void... ignore) {
+        protected ArrayList<Programme> doInBackground(Void... ignore) {
             synchronized (mTaskInfo) {
                 try {
                     Log.d(TAG, "Request EPG Metadata for: " + mTaskInfo.getServiceUID());
-                    Uri.Builder builder = mTaskInfo.getmEndPointUri().buildUpon();
+                    Uri.Builder uBuilder = mTaskInfo.getmEndPointUri().buildUpon();
                     if (mTaskInfo.isNowNext) {
-                        builder.appendQueryParameter("now_next", "true");
+                        uBuilder.appendQueryParameter("now_next", "true");
                     } else {
                         long currentTimestamp = System.currentTimeMillis() / 1000;
                         long startTime = (currentTimestamp - EPG_INTERVAL) - currentTimestamp % EPG_INTERVAL;
                         long endTime = (currentTimestamp + EPG_INTERVAL * 7) - currentTimestamp % EPG_INTERVAL;
-                        builder.appendQueryParameter("start", String.valueOf(startTime));
-                        builder.appendQueryParameter("end", String.valueOf(endTime));
+                        uBuilder.appendQueryParameter("start", String.valueOf(startTime));
+                        uBuilder.appendQueryParameter("end", String.valueOf(endTime));
                     }
-                    URL url = new URL(builder.build().toString());
-                    boolean useHttps = false;
-                    HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-                    //                if (useHttps) {
-                    //                    // Configure the SSL context for HTTPS connections
-                    //                    SSLContext sslContext = SSLContext.getInstance("TLS");
-                    //                    sslContext.init(null, new TrustManager[]{new TrustAllManager()}, null);
-                    //                    ((HttpsURLConnection) connection).setSSLSocketFactory(sslContext.getSocketFactory());
-                    //                    ((HttpsURLConnection) connection).setHostnameVerifier((hostname, session) -> true);
-                    //                }
-                    connection.setRequestMethod("GET");
-                    connection.setRequestProperty("Content-Type", "application/xml");
-                    int responseCode = connection.getResponseCode();
-                    Log.i(TAG, mTaskInfo.getServiceUID() + " response Code: " + responseCode);
-                    Log.i(TAG, "Cache control: " + connection.getHeaderField("Cache-Control"));
 
-                    InputStream inputStream = connection.getInputStream();
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
-                    StringBuilder responseBuilder = new StringBuilder();
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        responseBuilder.append(line);
-                    }
-                    reader.close();
+                    XmlNode epgMetadata = fetchDataFromUri(new URL(uBuilder.build().toString()));
+                    XmlNode epgProgramInfoMetadata = null;
 
-                    Log.d(TAG, responseBuilder.toString());
-
-                    if (!mTaskInfo.isNowNext && responseBuilder.length() <= 0) {
+                    if (!mTaskInfo.isNowNext && (epgMetadata == null || epgMetadata.getChildrenCount() == 0)) {
                         mTaskInfo.isNowNext = true;
                         return doInBackground();
                     }
@@ -306,48 +346,57 @@ public class EpgManager {
                         // mTimestamp.set(connection.getHeaderField("Cache-Control"));
                         mTaskInfo.nextUpdate = System.currentTimeMillis() / 1000 + 300;
                     }
-                    return XmlNode.parse(responseBuilder.toString());
+
+                    ArrayList<Programme> programmes = new ArrayList<>();
+                    if (epgMetadata != null) {
+                        List<XmlNode> scheduleEvents = epgMetadata.getDescendantsByName("ScheduleEvent");
+                        List<XmlNode> programmesInfo = epgMetadata.getDescendantsByName("ProgramInformation");
+                        Uri auxEndPointUri = mTaskInfo.getmAuxEndPointUri();
+                        mUpdatedServices.add(mTaskInfo.getServiceUID());
+
+                        for (XmlNode info : programmesInfo) {
+                            Programme.Builder pBuilder = new Programme.Builder();
+                            String programId = info.getAttribute("programId");
+                            if (programId != null) {
+                                for (XmlNode event : scheduleEvents) {
+                                    XmlNode programNode = event.getDescendantByName("Program");
+                                    if (programNode != null && programId.equals(programNode.getAttribute("crid"))) {
+                                        findStartEndTimes(event, pBuilder, System.currentTimeMillis() / 1000, SECONDS_OF_DAY);
+                                        if (auxEndPointUri != null && !auxEndPointUri.toString().isEmpty()) {
+                                            Uri.Builder auxBuilder = auxEndPointUri.buildUpon();
+                                            auxBuilder.appendQueryParameter("pid", programId);
+                                            epgProgramInfoMetadata = fetchDataFromUri(new URL(auxBuilder.build().toString()));
+                                            if (epgProgramInfoMetadata != null) {
+                                                findOnDemandProgram(epgProgramInfoMetadata, event, programId, pBuilder);
+                                            }
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                            findDescriptions(info, pBuilder);
+                            findParentalGuidance(info, pBuilder);
+                            findTitle(info, pBuilder);
+
+                            programmes.add(pBuilder
+                                    .setProgramId(programId)
+                                    .build());
+                        }
+                    }
+                    return programmes;
                 } catch (IOException e) {
-                    Log.e(TAG, "Error sending request", e);
+                    Log.e(TAG, "IOException", e);
                 } catch (Exception e) {
-                    Log.e(TAG, "Error configuring SSL context", e);
+                    Log.e(TAG, "Parsing error", e);
                 }
             }
             return null;
         }
 
         @Override
-        public void onPostExecute(XmlNode epgMetadata) {
+        public void onPostExecute(ArrayList<Programme> programmes) {
             synchronized (mLock) {
-                if (epgMetadata != null) {
-                    List<XmlNode> scheduleEvents = epgMetadata.getDescendantsByName("ScheduleEvent");
-                    List<XmlNode> programmesInfo = epgMetadata.getDescendantsByName("ProgramInformation");
-                    ArrayList<Programme> programmes = new ArrayList<>();
-                    mUpdatedServices.add(mTaskInfo.getServiceUID());
-                    for (XmlNode info : programmesInfo) {
-                        try {
-                            Programme.Builder builder = new Programme.Builder();
-                            String programId = info.getAttribute("programId");
-                            if (programId != null) {
-                                for (XmlNode event : scheduleEvents) {
-                                    XmlNode programNode = event.getDescendantByName("Program");
-                                    if (programNode != null && programId.equals(programNode.getAttribute("crid"))) {
-                                        findStartEndTimes(event, builder, System.currentTimeMillis() / 1000, SECONDS_OF_DAY);
-                                        break;
-                                    }
-                                }
-                            }
-                            findDescriptions(info, builder);
-                            findParentalGuidance(info, builder);
-                            findTitle(info, builder);
-
-                            programmes.add(builder
-                                    .setProgramId(programId)
-                                    .build());
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                        }
-                    }
+                if (programmes != null) {
                     mDbHandler.updateProgrammesForService(mTaskInfo.getServiceUID(), programmes);
                 }
                 mEpgMetadataTasks.remove(this);
@@ -366,13 +415,16 @@ public class EpgManager {
         public Long nextUpdate = null;
         public boolean isNowNext = false;
         public Uri mEndPointUri;
+        public Uri mAuxEndPointUri;
         private String mServiceUID;
-        public EpgTaskInfo(String serviceUID, Uri endPointUri) {
+        public EpgTaskInfo(String serviceUID, Uri endPointUri, Uri auxEndPointUri) {
             mServiceUID = serviceUID;
             mEndPointUri = endPointUri;
+            mAuxEndPointUri = auxEndPointUri;
         }
         public String getServiceUID() { return mServiceUID; }
         public Uri getmEndPointUri() { return mEndPointUri; }
+        public Uri getmAuxEndPointUri() { return mAuxEndPointUri; }
     }
 
     public interface Callback {
