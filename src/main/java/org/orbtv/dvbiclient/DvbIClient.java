@@ -774,6 +774,24 @@ public class DvbIClient {
         return ret;
     }
 
+    public boolean isInstanceInCurrentService(int onid, int tsid, int sid) {
+        Service service = mServiceManager.getTunedService();
+        if (service != null) {
+            for (ServiceInstance instance: service.getInstances()) {
+                DvbIChannelAdapter channel = new DvbIChannelAdapter.Builder()
+                    .setService(service)
+                    .setServiceInstance(instance)
+                    .build();
+                if (channel.getOnid() == onid && channel.getTsid() == tsid && channel.getSid() == sid) {
+                    Log.d(TAG, "Instance with triplet dvb://" + onid + "." + tsid + "." + sid + " belongs to the current service.");
+                    return true;
+                }
+            }
+        }
+        Log.d(TAG, "Instance with triplet dvb://" + onid + "." + tsid + "." + sid + " does not belong to the current service.");
+        return false;
+    }
+
     private void invalidateErrorTimer() {
         if (mPermanentErrorTimer != null) {
             mPermanentErrorTimer.cancel();
