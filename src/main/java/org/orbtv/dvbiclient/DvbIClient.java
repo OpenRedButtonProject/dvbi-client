@@ -276,7 +276,9 @@ public class DvbIClient {
                 }
                 if (!data.isNull("__orb_204data__")) {
                     JSONObject data204 = data.getJSONObject("__orb_204data__");
-                    messageData = data204.getString("payload");
+                    if (!data204.isNull("payload")) {
+                        messageData = data204.getString("payload");
+                    }
                     contentEncoding = data204.getString("type");
                 }
                 for (Map.Entry<Integer, StreamEventInfo> entry : mStreamEventsLookup.entrySet()) {
