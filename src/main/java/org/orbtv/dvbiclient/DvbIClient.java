@@ -428,6 +428,7 @@ public class DvbIClient {
             dispatchPlayerStatusChangedEvent(onid, tsid, sid, eventName);
             switch (eventName) {
                 case PLAYER_STATUS_PLAYING:
+                    mLastState = PLAYER_STATUS_PLAYING;
                     DvbIChannelAdapter channel = mServiceManager.getTunedChannel();
                     if (channel != null) {
                         mTvInputCallback.notifyVideoAvailable();
