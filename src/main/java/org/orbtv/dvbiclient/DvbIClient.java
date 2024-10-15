@@ -860,8 +860,7 @@ public class DvbIClient {
         TvContentRating[] tvContentRatings = null;
         if ((rating >= 4) && (rating <= 18)) {
             tvContentRatings = new TvContentRating[]{
-                    TvContentRating.createRating("com.android.tv", "DVB",
-                            "DVB_" + rating)
+                    TvContentRating.createRating("com.android.tv", "DVB", "DVB_" + (rating - 3))
             };
         }
         return tvContentRatings;
