@@ -254,22 +254,18 @@ public class DvbIClient {
             try {
                 String Id = "";
                 String status = "error";
-                int startTime = -1;
-                int duration = -1;
-                int timescale = 1;
+                double startTime = -1;
+                double duration = -1;
                 String messageData = "";
                 String contentEncoding = "binary";
                 if (!data.isNull("id")) {
                     Id = data.getString("id");
                 }
-                if (!data.isNull("timescale")) {
-                    timescale = data.getInt("timescale");
-                }
                 if (!data.isNull("calculatedPresentationTime")) {
-                    startTime = (int) (data.getDouble("calculatedPresentationTime") * timescale);
+                    startTime = data.getDouble("calculatedPresentationTime");
                 }
                 if (!data.isNull("duration")) {
-                    duration = (int) (data.getDouble("duration") * timescale);
+                    duration = data.getDouble("duration");
                 }
                 if (!data.isNull("status")) {
                     status = data.getString("status");
