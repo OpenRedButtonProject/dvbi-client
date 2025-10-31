@@ -919,6 +919,13 @@ public class DvbIClient {
                     int responseCode = connection.getResponseCode();
                     Log.i(TAG, "Response Code: " + responseCode);
 
+                    // Handle non-200 response codes gracefully (e.g., 404 when servicelist.xml doesn't exist yet)
+                    if (responseCode != HttpURLConnection.HTTP_OK) {
+                        Log.w(TAG, "Service list URL returned " + responseCode + ": " + uri + 
+                              " (Service list may not be available yet - this is OK for auto-loading)");
+                        continue; // Skip this URI and continue to next if any
+                    }
+
                     // Read the response from the input stream
                     InputStream inputStream = connection.getInputStream();
                     BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
