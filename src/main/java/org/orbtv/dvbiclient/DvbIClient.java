@@ -760,7 +760,8 @@ public class DvbIClient {
         if (mLastDiscoveryTask == null) {
             mLastDiscoveryTask = new ServiceListDiscoveryTask();
             if (serviceListURL == null || serviceListURL.isEmpty()) {
-                serviceListURL = "http://192.168.1.158/servicelist.xml";
+                // Default to HbbTV test harness service list URL for test environment
+                serviceListURL = "http://hbbtv1.test/servicelist.xml";
             }
             mLastDiscoveryTask = new ServiceListDiscoveryTask();
             Log.d(TAG, "Starting service search at " + serviceListURL);
