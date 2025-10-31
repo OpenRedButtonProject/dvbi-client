@@ -970,8 +970,15 @@ public class DvbIClient {
         }
 
         private synchronized void finalizeSearch() {
+            Log.d(TAG, "finalizeSearch: Service list discovery completed, triggering callbacks");
             for (DvbCallback handler : mDvbCallbacks) {
                 handler.onDvbtStatusChanged(100);
+            }
+            // Trigger channel sync after service list is loaded/updated
+            // This ensures DVB-I channels are added to TV Contract so they appear in the channel list
+            Log.d(TAG, "finalizeSearch: Triggering onServiceAdded() to sync channels. Callback count: " + mDvbCallbacks.size());
+            for (DvbCallback handler : mDvbCallbacks) {
+                handler.onServiceAdded();
             }
             mLastDiscoveryTask = null;
 
