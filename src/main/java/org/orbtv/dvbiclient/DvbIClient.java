@@ -45,6 +45,7 @@ public class DvbIClient {
     private static final String PREF_DVBI_SERVICE_LIST_URL = "dvbi_service_list_url";
 
     public static final String TYPE_DVB_I = "TYPE_DVB_I";
+    public static final String TYPE_OTHER = "TYPE_OTHER";
     public static final String KEY_DVBI_UID = "DVBI_UID";
 
     public static final String PLAYER_STATUS_STARTING = "DVBI_PLAYBACK_STARTED";

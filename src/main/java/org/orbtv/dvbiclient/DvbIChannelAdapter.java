@@ -53,7 +53,11 @@ public class DvbIChannelAdapter {
         this.mName = determineChannelName(instance, parentService);
         this.mMajorChannel = determineMajorChannel(parentService);
         this.mDsd = null; // Undefined or will be populated later
-        this.mIpBroadcastID = instance.getDeliveryParameters().get("UriBasedLocation");
+        String uriBasedLocation = instance.getDeliveryParameters().get("UriBasedLocation");
+        // Fallback to parent service's unique identifier if UriBasedLocation is not available
+        this.mIpBroadcastID = (uriBasedLocation != null && !uriBasedLocation.isEmpty()) 
+                ? uriBasedLocation 
+                : (parentService != null ? parentService.getUniqueIdentifier() : null);
         this.mTerminalChannel = determineTerminalChannel(instance);
         determineApps(instance, parentService);
     }
@@ -194,10 +198,17 @@ public class DvbIChannelAdapter {
                 case "dvb-dash":
                     //return "ID_DVB_DASH";
                     return 51;
+                default:
+                    // For delivery types not supported by the emulator (e.g., non-broadcast types
+                    // that are not dvb-dash), return ID_OTHER to indicate they are detected but
+                    // not fully supported
+                    //return "ID_OTHER";
+                    return 52; // BridgeTypes.Channel.ID_OTHER
             }
         }
-        //return "UNSUPPORTED"; //default value? also support for T2, S2
-        return -1;
+        // If deliveryType is null or empty, also return ID_OTHER
+        //return "ID_OTHER";
+        return 52; // BridgeTypes.Channel.ID_OTHER
     }
 
     private int determineOnid(IService service, IService fallback) {
