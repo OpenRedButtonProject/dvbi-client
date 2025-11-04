@@ -1,6 +1,7 @@
 package org.orbtv.dvbiclient;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.media.tv.TvContentRating;
 import android.media.tv.TvInputManager;
 import android.media.tv.TvTrackInfo;
@@ -19,10 +20,14 @@ import org.orbtv.companionlibrary.model.Program;
 import org.orbtv.companionlibrary.utils.AsyncUtils;
 import org.orbtv.dvbiclient.model.*;
 
+import org.xmlpull.v1.XmlPullParser;
+import org.xmlpull.v1.XmlPullParserFactory;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.StringReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
@@ -36,6 +41,8 @@ import java.util.TimerTask;
 public class DvbIClient {
     private static DvbIClient mSingleton;
     private static final String TAG = DvbIClient.class.getSimpleName();
+    private static final String PREF_DVBI_SERVICE_LIST_VERSION = "dvbi_service_list_version";
+    private static final String PREF_DVBI_SERVICE_LIST_URL = "dvbi_service_list_url";
 
     public static final String TYPE_DVB_I = "TYPE_DVB_I";
     public static final String KEY_DVBI_UID = "DVBI_UID";
@@ -75,6 +82,7 @@ public class DvbIClient {
     private final DvbIView mDvbIView;
     private final HashMap<Integer, StreamEventInfo> mStreamEventsLookup = new HashMap<>();
     private ServiceListDiscoveryTask mLastDiscoveryTask = null;
+    private String mCurrentServiceListUrl = null; // Track URL being loaded for version saving
     private final DatabaseHandler mDbHandler;
     private final ArrayList<DvbCallback> mDvbCallbacks = new ArrayList<>();
     private final ArrayList<HbbTVCallback> mHbbTVCallbacks = new ArrayList<>();
@@ -774,6 +782,150 @@ public class DvbIClient {
         return ret;
     }
 
+    /**
+     * Update the DVB-I service list if the version has changed.
+     * Per TS 103 770, the @version attribute is incremented for each change in the data.
+     * This method checks the version before reloading to avoid unnecessary updates.
+     * 
+     * @param serviceListURL URL to the service list XML, or null to use default
+     * @return true if service list was updated or is being updated, false if version unchanged or error
+     */
+    public boolean updateServiceList(String serviceListURL) {
+        if (serviceListURL == null || serviceListURL.isEmpty()) {
+            // Default to HbbTV test harness service list URL for test environment
+            serviceListURL = "http://hbbtv1.test/servicelist.xml";
+        }
+
+        // Get current version from service list
+        String currentVersion = getServiceListVersion(serviceListURL);
+        if (currentVersion == null) {
+            // Could not determine version, reload to be safe
+            Log.d(TAG, "Could not determine DVB-I service list version, reloading to ensure latest data");
+            return startServiceSearch(serviceListURL);
+        }
+
+        // Check stored version
+        SharedPreferences prefs = mDvbIView.getContext().getSharedPreferences("DvbIClient", Context.MODE_PRIVATE);
+        String lastKnownVersion = prefs.getString(PREF_DVBI_SERVICE_LIST_VERSION, null);
+        String lastKnownUrl = prefs.getString(PREF_DVBI_SERVICE_LIST_URL, null);
+
+        if (lastKnownVersion == null || !currentVersion.equals(lastKnownVersion) || 
+            !serviceListURL.equals(lastKnownUrl)) {
+            Log.d(TAG, String.format("DVB-I service list version changed from %s to %s, reloading", 
+                lastKnownVersion, currentVersion));
+            // Store URL and version to save after successful load
+            mCurrentServiceListUrl = serviceListURL;
+            boolean started = startServiceSearch(serviceListURL);
+            return started;
+        } else {
+            Log.d(TAG, String.format("DVB-I service list version unchanged (%s), skipping reload", currentVersion));
+            return false;
+        }
+    }
+
+    /**
+     * Extract the version attribute from the DVB-I service list XML string.
+     * Per TS 103 770, the @version attribute is incremented for each change.
+     * @param xmlContent The XML content as a string
+     * @return Version string, or null if unable to parse
+     */
+    private String extractVersionFromXml(String xmlContent) {
+        try {
+            XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
+            factory.setNamespaceAware(true);
+            XmlPullParser parser = factory.newPullParser();
+            parser.setInput(new java.io.StringReader(xmlContent));
+            
+            // Parse until we find the ServiceList element
+            int eventType = parser.getEventType();
+            while (eventType != XmlPullParser.END_DOCUMENT) {
+                if (eventType == XmlPullParser.START_TAG) {
+                    String tagName = parser.getName();
+                    if ("ServiceList".equals(tagName)) {
+                        // Found ServiceList - get version attribute
+                        String version = parser.getAttributeValue(null, "version");
+                        return version;
+                    }
+                }
+                eventType = parser.next();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Error parsing service list version: " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Fetch the version attribute from the DVB-I service list XML via HTTP.
+     * Per TS 103 770, the @version attribute is incremented for each change.
+     * This is used for version checking before downloading the full XML.
+     * @param serviceListUrl URL to the service list XML
+     * @return Version string, or null if unable to fetch/parse
+     */
+    private String getServiceListVersion(String serviceListUrl) {
+        try {
+            URL url = new URL(serviceListUrl);
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setConnectTimeout(3000);
+            connection.setReadTimeout(3000);
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("Accept", "application/xml, text/xml, */*");
+            
+            int responseCode = connection.getResponseCode();
+            if (responseCode == HttpURLConnection.HTTP_OK) {
+                InputStream inputStream = connection.getInputStream();
+                try {
+                    // Read just enough to parse the root element
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
+                    StringBuilder xmlStart = new StringBuilder();
+                    String line;
+                    int lineCount = 0;
+                    while ((line = reader.readLine()) != null && lineCount < 10) {
+                        xmlStart.append(line);
+                        xmlStart.append("\n");
+                        lineCount++;
+                        // Check if we've seen the ServiceList tag
+                        if (line.contains("<ServiceList")) {
+                            // Try to extract version from this line
+                            int versionIndex = line.indexOf("version=\"");
+                            if (versionIndex >= 0) {
+                                int start = versionIndex + 9; // "version=\"" is 9 chars
+                                int end = line.indexOf("\"", start);
+                                if (end > start) {
+                                    return line.substring(start, end);
+                                }
+                            }
+                        }
+                    }
+                    // If not found in first few lines, parse with XML parser
+                    String xmlContent = xmlStart.toString();
+                    return extractVersionFromXml(xmlContent);
+                } finally {
+                    inputStream.close();
+                }
+            } else {
+                Log.w(TAG, String.format("Failed to fetch service list version: HTTP %d", responseCode));
+            }
+            connection.disconnect();
+        } catch (Exception e) {
+            Log.w(TAG, "Error fetching service list version: " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Save the service list version and URL to SharedPreferences.
+     * This should be called after a successful service list update.
+     */
+    private void saveServiceListVersion(String serviceListUrl, String version) {
+        SharedPreferences prefs = mDvbIView.getContext().getSharedPreferences("DvbIClient", Context.MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putString(PREF_DVBI_SERVICE_LIST_VERSION, version);
+        editor.putString(PREF_DVBI_SERVICE_LIST_URL, serviceListUrl);
+        editor.apply();
+        Log.d(TAG, String.format("Saved DVB-I service list version %s for URL %s", version, serviceListUrl));
+    }
+
     public boolean isInstanceInCurrentService(int onid, int tsid, int sid) {
         Service service = mServiceManager.getTunedService();
         if (service != null) {
@@ -947,6 +1099,14 @@ public class DvbIClient {
                         Log.d(TAG, "--------- scanned service ----------\n" + service);
                     }
                     mDbHandler.updateServiceList(serviceList);
+                    
+                    // Extract and save version from the loaded XML
+                    if (mCurrentServiceListUrl != null && uri.equals(mCurrentServiceListUrl)) {
+                        String version = extractVersionFromXml(responseBuilder.toString());
+                        if (version != null) {
+                            saveServiceListVersion(uri, version);
+                        }
+                    }
                 }
                 mEpgManager.refreshServiceLists();
             }
@@ -971,6 +1131,8 @@ public class DvbIClient {
 
         private synchronized void finalizeSearch() {
             Log.d(TAG, "finalizeSearch: Service list discovery completed, triggering callbacks");
+            mLastDiscoveryTask = null; // Reset so new searches can be started
+            mCurrentServiceListUrl = null; // Clear tracked URL
             for (DvbCallback handler : mDvbCallbacks) {
                 handler.onDvbtStatusChanged(100);
             }
@@ -980,7 +1142,6 @@ public class DvbIClient {
             for (DvbCallback handler : mDvbCallbacks) {
                 handler.onServiceAdded();
             }
-            mLastDiscoveryTask = null;
 
             //TOREMOVE
 //            String serviceUniqueIdentifier = "tag:sofiadigital.com,2023:org.hbbtv_DVBI_VBO0200-1";
