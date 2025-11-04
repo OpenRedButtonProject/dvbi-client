@@ -308,6 +308,9 @@ public class EpgManager {
 
                 Log.d(TAG, "fetchDataFromUri response: " + responseBuilder.toString());
                 return XmlNode.parse(responseBuilder.toString());
+            } catch (java.io.FileNotFoundException e) {
+                    // FileNotFoundException is expected when EPG URLs are not available
+                    Log.d(TAG, "EPG data not available: " + url.toString());
             } catch (Exception e) {
                     Log.e(TAG, "error", e);
             } finally {

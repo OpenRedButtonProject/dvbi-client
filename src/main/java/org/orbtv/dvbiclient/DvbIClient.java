@@ -977,7 +977,7 @@ public class DvbIClient {
                 } catch (InternalProviderData.ParseException e) {
                     e.printStackTrace();
                 }
-                Log.i(TAG, programme.toString());
+                //Log.i(TAG, programme.toString());
 
                 events.add(new Program.Builder()
                         .setChannelId(channel.getId())

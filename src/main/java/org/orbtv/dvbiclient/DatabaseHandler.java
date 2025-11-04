@@ -269,7 +269,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
             ContentValues values = programme.toContentValues();
             values.put(COLUMN_FOREIGN_KEY, serviceUID);
             db.insert(PROGRAMMES_TABLE, null, values);
-            Log.d(TAG, "Updated program: " + programme.getTitle());
+            //Log.d(TAG, "Updated program: " + programme.getTitle());
         }
     }
 
