@@ -787,7 +787,7 @@ public class DvbIClient {
      * Update the DVB-I service list if the version has changed.
      * Per TS 103 770, the @version attribute is incremented for each change in the data.
      * This method checks the version before reloading to avoid unnecessary updates.
-     * 
+     *
      * @param serviceListURL URL to the service list XML, or null to use default
      * @return true if service list was updated or is being updated, false if version unchanged or error
      */
@@ -810,9 +810,9 @@ public class DvbIClient {
         String lastKnownVersion = prefs.getString(PREF_DVBI_SERVICE_LIST_VERSION, null);
         String lastKnownUrl = prefs.getString(PREF_DVBI_SERVICE_LIST_URL, null);
 
-        if (lastKnownVersion == null || !currentVersion.equals(lastKnownVersion) || 
+        if (lastKnownVersion == null || !currentVersion.equals(lastKnownVersion) ||
             !serviceListURL.equals(lastKnownUrl)) {
-            Log.d(TAG, String.format("DVB-I service list version changed from %s to %s, reloading", 
+            Log.d(TAG, String.format("DVB-I service list version changed from %s to %s, reloading",
                 lastKnownVersion, currentVersion));
             // Store URL and version to save after successful load
             mCurrentServiceListUrl = serviceListURL;
@@ -836,7 +836,7 @@ public class DvbIClient {
             factory.setNamespaceAware(true);
             XmlPullParser parser = factory.newPullParser();
             parser.setInput(new java.io.StringReader(xmlContent));
-            
+
             // Parse until we find the ServiceList element
             int eventType = parser.getEventType();
             while (eventType != XmlPullParser.END_DOCUMENT) {
@@ -871,7 +871,7 @@ public class DvbIClient {
             connection.setReadTimeout(3000);
             connection.setRequestMethod("GET");
             connection.setRequestProperty("Accept", "application/xml, text/xml, */*");
-            
+
             int responseCode = connection.getResponseCode();
             if (responseCode == HttpURLConnection.HTTP_OK) {
                 InputStream inputStream = connection.getInputStream();
@@ -991,7 +991,7 @@ public class DvbIClient {
                         .build());
             }
         }
-        Log.i(TAG, "Retrieved " + events.size() + " programs for service " + uid + " with id " + channel.getId() + " in the range of " + start + " and " + end);
+        //Log.i(TAG, "Retrieved " + events.size() + " programs for service " + uid + " with id " + channel.getId() + " in the range of " + start + " and " + end);
         return events;
     }
 
@@ -1075,7 +1075,7 @@ public class DvbIClient {
 
                     // Handle non-200 response codes gracefully (e.g., 404 when servicelist.xml doesn't exist yet)
                     if (responseCode != HttpURLConnection.HTTP_OK) {
-                        Log.w(TAG, "Service list URL returned " + responseCode + ": " + uri + 
+                        Log.w(TAG, "Service list URL returned " + responseCode + ": " + uri +
                               " (Service list may not be available yet - this is OK for auto-loading)");
                         continue; // Skip this URI and continue to next if any
                     }
@@ -1100,7 +1100,7 @@ public class DvbIClient {
                         Log.d(TAG, "--------- scanned service ----------\n" + service);
                     }
                     mDbHandler.updateServiceList(serviceList);
-                    
+
                     // Extract and save version from the loaded XML
                     if (mCurrentServiceListUrl != null && uri.equals(mCurrentServiceListUrl)) {
                         String version = extractVersionFromXml(responseBuilder.toString());
