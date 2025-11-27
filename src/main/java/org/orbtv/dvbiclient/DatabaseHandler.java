@@ -189,11 +189,18 @@ public class DatabaseHandler extends SQLiteOpenHelper {
             if (cursor != null && cursor.moveToFirst())
             {
                 Triplet triplet = null;
+                Integer networkId = null;
                 try {
-                    triplet = Triplet.parseFromURI(new JSONObject(new String(cursor.getBlob(3))).getString("hbbtv-i:DVBTriplet"));
+                    JSONObject params = new JSONObject(new String(cursor.getBlob(3)));
+                    if (params.has("hbbtv-i:DVBTriplet")) {
+                        triplet = Triplet.parseFromURI(params.getString("hbbtv-i:DVBTriplet"));
+                    }
+                    if (params.has("NetworkID")) {
+                        networkId = params.getInt("NetworkID");
+                    }
                 }
                 catch (Exception e) { }
-                service = new Service.Builder()
+                Service.Builder serviceBuilder = new Service.Builder()
                         .setServiceNames(getServiceNamesForUID(db, cursor.getString(1)))
                         .setProviderName(cursor.getString(0))
                         .setUniqueIdentifier(cursor.getString(1))
@@ -204,8 +211,11 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                         .setRelatedMaterials(getRelatedMaterials(db, FOREIGN_KEY_PREFIX_SERVICE + cursor.getString(1)))
                         .setContentGuideSource(getContendGuideForCGSID(db, cursor.getString(5)))
                         .setParentalRating(cursor.getInt(6))
-                        .setContentGuideServiceRef(cursor.getString(7))
-                        .build();
+                        .setContentGuideServiceRef(cursor.getString(7));
+                if (networkId != null) {
+                    serviceBuilder.setNetworkId(networkId);
+                }
+                service = serviceBuilder.build();
             }
         }
         finally
@@ -339,11 +349,18 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                 while (cursor.moveToNext())
                 {
                     Triplet triplet = null;
+                    Integer networkId = null;
                     try {
-                        triplet = Triplet.parseFromURI(new JSONObject(new String(cursor.getBlob(3))).getString("hbbtv-i:DVBTriplet"));
+                        JSONObject params = new JSONObject(new String(cursor.getBlob(3)));
+                        if (params.has("hbbtv-i:DVBTriplet")) {
+                            triplet = Triplet.parseFromURI(params.getString("hbbtv-i:DVBTriplet"));
+                        }
+                        if (params.has("NetworkID")) {
+                            networkId = params.getInt("NetworkID");
+                        }
                     }
                     catch (Exception e) { }
-                    ret.add(serviceBuilder
+                    Service.Builder builder = serviceBuilder
                             .setServiceNames(getServiceNamesForUID(db, cursor.getString(1)))
                             .setProviderName(cursor.getString(0))
                             .setUniqueIdentifier(cursor.getString(1))
@@ -354,8 +371,11 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                             .setRelatedMaterials(getRelatedMaterials(db, FOREIGN_KEY_PREFIX_SERVICE + cursor.getString(1)))
                             .setContentGuideSource(getContendGuideForCGSID(db, cursor.getString(5)))
                             .setParentalRating(cursor.getInt(6))
-                            .setContentGuideServiceRef(cursor.getString(7))
-                            .build());
+                            .setContentGuideServiceRef(cursor.getString(7));
+                    if (networkId != null) {
+                        builder.setNetworkId(networkId);
+                    }
+                    ret.add(builder.build());
                 }
             }
         }

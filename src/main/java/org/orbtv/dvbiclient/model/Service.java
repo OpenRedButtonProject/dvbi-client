@@ -35,6 +35,7 @@ public class Service implements IService {
     private Integer mParentalRating;
     private Map<String, String> mServiceNames = new HashMap<>();
     private String mLcnNumber;
+    private Integer mNetworkId;
 
     private Service() { }
 
@@ -73,6 +74,8 @@ public class Service implements IService {
 
     public String getLCNNumber() { return mLcnNumber; }
 
+    public Integer getNetworkId() { return mNetworkId; }
+
     public ContentGuide getContentGuide() { return mContentGuideSource; }
 
     public Integer getParentalRating() { return mParentalRating; }
@@ -110,6 +113,13 @@ public class Service implements IService {
         if (mTriplet != null) {
             try {
                 params.put("hbbtv-i:DVBTriplet", mTriplet);
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+        }
+        if (mNetworkId != null) {
+            try {
+                params.put("NetworkID", mNetworkId);
             } catch (JSONException e) {
                 e.printStackTrace();
             }
@@ -177,7 +187,36 @@ public class Service implements IService {
     private static void parseAdditionalParameters(Service service, XmlPullParser xpp) throws Exception {
         String extensionName = xpp.getAttributeValue(null, "extensionName");
         if (extensionName != null && extensionName.equals("urn:hbbtv:dvbi:service:serviceIdentifierTriplet")) {
-            service.mTriplet = Triplet.parseFromXML(xpp);
+            // Parse DVBTriplet and NetworkID from AdditionalServiceParameters
+            // The parser is currently at START_TAG of AdditionalServiceParameters
+            int eventType = xpp.next();
+            while (!(eventType == XmlPullParser.END_TAG && "AdditionalServiceParameters".equals(xpp.getName()))) {
+                if (eventType == XmlPullParser.START_TAG) {
+                    String tagName = xpp.getName();
+                    if ("DVBTriplet".equals(tagName) || "hbbtv-i:DVBTriplet".equals(tagName)) {
+                        // Parse DVBTriplet attributes
+                        String origNetId = xpp.getAttributeValue(null, "origNetId");
+                        String tsId = xpp.getAttributeValue(null, "tsId");
+                        String serviceId = xpp.getAttributeValue(null, "serviceId");
+                        service.mTriplet = new Triplet.Builder()
+                                .setOrigNetId(origNetId != null ? Integer.parseInt(origNetId) : 0)
+                                .setTsId(tsId != null ? Integer.parseInt(tsId) : 0)
+                                .setServiceId(serviceId != null ? Integer.parseInt(serviceId) : 0)
+                                .build();
+                    } else if ("NetworkID".equals(tagName)) {
+                        String networkIdText = xpp.nextText();
+                        if (networkIdText != null && !networkIdText.trim().isEmpty()) {
+                            try {
+                                service.mNetworkId = Integer.parseInt(networkIdText.trim());
+                                Log.d(TAG, "Parsed NetworkID from AdditionalServiceParameters: " + service.mNetworkId);
+                            } catch (NumberFormatException e) {
+                                Log.e(TAG, "Error parsing NetworkID: " + networkIdText, e);
+                            }
+                        }
+                    }
+                }
+                eventType = xpp.next();
+            }
         }
     }
 
@@ -252,6 +291,10 @@ public class Service implements IService {
             mInstance.mLcnNumber = value;
             return this;
         }
+        public Service.Builder setNetworkId(Integer value) {
+            mInstance.mNetworkId = value;
+            return this;
+        }
         public Service build() {
             Service instance = new Service();
             instance.mUniqueIdentifier = mInstance.mUniqueIdentifier;
@@ -266,6 +309,7 @@ public class Service implements IService {
             instance.mParentalRating = mInstance.mParentalRating;
             instance.mServiceNames = mInstance.mServiceNames;
             instance.mLcnNumber = mInstance.mLcnNumber;
+            instance.mNetworkId = mInstance.mNetworkId;
             return instance;
         }
     }
