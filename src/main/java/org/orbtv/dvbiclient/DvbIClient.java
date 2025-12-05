@@ -693,7 +693,7 @@ public class DvbIClient {
         long end = (currentTime + 10800 * 7) - currentTime % 10800;
         for (String uid : mUpdatedServiceEPGs) {
             Service service = mDbHandler.getServiceForUID(uid);
-            Log.d(TAG, "Get updated event period for service " + uid);
+            //Log.d(TAG, "Get updated event period for service " + uid);
 
             // TODO: In case the triplet is null, return the child instance's triplet
             if (service != null && service.getTriplet() != null) {
@@ -1096,9 +1096,9 @@ public class DvbIClient {
                     String targetRegion = "";
                     ServiceList serviceList = ServiceList.parseFromXML(uri, responseBuilder.toString(), targetRegion);
 
-                    for (Service service : serviceList.getServices()) {
-                        Log.d(TAG, "--------- scanned service ----------\n" + service);
-                    }
+                    //for (Service service : serviceList.getServices()) {
+                    //    Log.d(TAG, "--------- scanned service ----------\n" + service);
+                    //}
                     mDbHandler.updateServiceList(serviceList);
 
                     // Extract and save version from the loaded XML

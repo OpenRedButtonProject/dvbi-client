@@ -239,7 +239,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
             Log.d(TAG, "Adding service list " + serviceList.getUID());
         }
         else {
-            Log.d(TAG, "Updating service list " + serviceList.getUID());
+            //Log.d(TAG, "Updating service list " + serviceList.getUID());
         }
 
         for (Service service : serviceList.getServices()) {
@@ -414,7 +414,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                     cursor.close();
                 }
             }
-            Log.i(TAG, "Content guide for cgsid '" + cgsid + "'\n" + guide);
+            // Log.i(TAG, "Content guide for cgsid '" + cgsid + "'\n" + guide);
         }
         return guide;
     }
@@ -429,7 +429,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
             Log.d(TAG, "Adding service " + uid);
         }
         else {
-            Log.d(TAG, "Updating service " + uid);
+            //Log.d(TAG, "Updating service " + uid);
         }
 
         updateContentGuide(db, service.getContentGuide());

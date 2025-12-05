@@ -257,7 +257,7 @@ public class EpgManager {
                     for (EpgTaskInfo info : mScheduleInfos) {
                         synchronized (info) {
                             if (info.nextUpdate != null && info.nextUpdate <= currentTimestamp) {
-                                Log.i(TAG, "Updating EPG for Service " + info.getServiceUID());
+                                //Log.i(TAG, "Updating EPG for Service " + info.getServiceUID());
                                 info.nextUpdate = null;
                                 EpgMetadataTask task = new EpgMetadataTask(info);
                                 mEpgMetadataTasks.add(task);
@@ -323,7 +323,7 @@ public class EpgManager {
         protected ArrayList<Programme> doInBackground(Void... ignore) {
             synchronized (mTaskInfo) {
                 try {
-                    Log.d(TAG, "Request EPG Metadata for: " + mTaskInfo.getServiceUID());
+                    //Log.d(TAG, "Request EPG Metadata for: " + mTaskInfo.getServiceUID());
                     Uri.Builder uBuilder = mTaskInfo.getmEndPointUri().buildUpon();
                     if (mTaskInfo.isNowNext) {
                         uBuilder.appendQueryParameter("now_next", "true");
