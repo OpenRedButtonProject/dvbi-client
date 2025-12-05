@@ -158,8 +158,16 @@ public class TunedServiceManager {
     }
 
     private ServiceInstance getMaxPriorityInstance(Service service) {
+        if (service == null) {
+            Log.w(TAG, "getMaxPriorityInstance called with null service");
+            return null;
+        }
         ServiceInstance maxInstance = null;
         List<ServiceInstance> instances = service.getInstances();
+        if (instances == null) {
+            Log.w(TAG, "Service.getInstances() returned null");
+            return null;
+        }
         for (int i = 0; i < instances.size(); i++) {
             ServiceInstance instance = instances.get(i);
             if (isInstanceAvailable(instance) && (maxInstance == null || maxInstance.getPriority() > instance.getPriority())) {
@@ -241,7 +249,7 @@ public class TunedServiceManager {
                     }
 
                     tunedInstance = mTunedInstance;
-                    if (mTargetInstance == null) {
+                    if (mTargetInstance == null && mTunedService != null) {
                         ServiceInstance priorityInstance = getMaxPriorityInstance(mTunedService);
                         if (priorityInstance != tunedInstance) {
                             mTunedInstance = priorityInstance;
