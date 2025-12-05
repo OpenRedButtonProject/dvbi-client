@@ -54,7 +54,18 @@ public class DvbIChannelAdapter {
         this.mMajorChannel = determineMajorChannel(parentService);
         this.mDsd = null; // Undefined or will be populated later
         String uriBasedLocation = instance.getDeliveryParameters().get("UriBasedLocation");
-        // Fallback to parent service's unique identifier if UriBasedLocation is not available
+        // If UriBasedLocation is not available, check RelatedMaterial for MediaUri
+        if (uriBasedLocation == null || uriBasedLocation.isEmpty()) {
+            List<RelatedMaterial> relatedMaterials = instance.getRelatedMaterials();
+            for (RelatedMaterial relatedMaterial : relatedMaterials) {
+                String mediaUri = relatedMaterial.getMediaLocatorUri();
+                if (mediaUri != null && !mediaUri.isEmpty()) {
+                    uriBasedLocation = mediaUri;
+                    break;
+                }
+            }
+        }
+        // Fallback to parent service's unique identifier if UriBasedLocation is still not available
         this.mIpBroadcastID = (uriBasedLocation != null && !uriBasedLocation.isEmpty()) 
                 ? uriBasedLocation 
                 : (parentService != null ? parentService.getUniqueIdentifier() : null);
