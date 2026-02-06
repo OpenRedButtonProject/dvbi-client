@@ -149,7 +149,10 @@ public class Service implements IService {
                             currentService.mContentGuideServiceRef = xpp.nextText();
                             break;
                         case "ParentalRating":
-                            currentService.mParentalRating = Integer.parseInt(xpp.nextText());
+                            String ratingText = xpp.nextText();
+                            currentService.mParentalRating = Integer.parseInt(ratingText);
+                            Log.d(TAG, "PARENTAL_RATING_DEBUG: Parsed ParentalRating from service list: " + ratingText + 
+                                " for service: " + (currentService.mUniqueIdentifier != null ? currentService.mUniqueIdentifier : "unknown"));
                             break;
                         case "UniqueIdentifier":
                             currentService.mUniqueIdentifier = xpp.nextText();
