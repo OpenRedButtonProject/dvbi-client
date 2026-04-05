@@ -104,10 +104,12 @@ public class DvbIClient {
         public void onInstanceChanged(ServiceInstance fromInstance, ServiceInstance toInstance) {
             DvbIChannelAdapter channel;
             Service service = mServiceManager.getTunedService();
-            if (service != null) {
-                Log.d(TAG, "PARENTAL_RATING_DEBUG: onInstanceChanged - service=" + service.getUniqueIdentifier() + 
-                    ", service.getParentalRating()=" + service.getParentalRating() + 
-                    ", mBlocked=" + mBlocked);
+            if (service == null) {
+                Log.e(TAG, "onInstanceChanged; No tuned service");
+            }
+            else {
+                Log.d(TAG, "PARENTAL_RATING_DEBUG: onInstanceChanged - service=" + service.getUniqueIdentifier() +
+                    ", service.getParentalRating()=" + service.getParentalRating() + ", mBlocked=" + mBlocked);
                 DvbIChannelAdapter.Builder channelBuilder = new DvbIChannelAdapter.Builder().setService(service);
                 if (toInstance != null) {
                     Log.i(TAG, "--------- active instance ---------\n" + toInstance + "\n---------------------------");
@@ -119,13 +121,10 @@ public class DvbIClient {
                         if (!mBlocked) {
                             Integer serviceRating = service.getParentalRating();
                             int parentalControlAge = mTvInputCallback.getParentalControlAge();
-                            Log.d(TAG, "PARENTAL_RATING_DEBUG: Checking parental rating for service: " + 
-                                service.getUniqueIdentifier() + 
-                                ", serviceRating=" + serviceRating + 
-                                ", parentalControlAge=" + parentalControlAge + 
-                                ", mBlocked=" + mBlocked);
+                            Log.d(TAG, "PARENTAL_RATING: for service: " + service.getUniqueIdentifier() +
+                                ", serviceRating=" + serviceRating + ", parentalControlAge=" + parentalControlAge);
                             if (serviceRating == null || serviceRating <= parentalControlAge) {
-                                Log.d(TAG, "PARENTAL_RATING_DEBUG: Service allowed (rating null or <= threshold). Proceeding with tune.");
+                                Log.d(TAG, "PARENTAL_RATING: Service allowed. Proceeding with tune.");
                                 if ("dvb-dash".equals(toInstance.getDeliveryType())) {
                                     mTvInputCallback.tuneOffBroadcast();
                                     if (mDvbIView.tune(uri, mSubtitlesEnabled) && !PLAYER_STATUS_STARTING.equals(mLastState)) {
@@ -145,10 +144,8 @@ public class DvbIClient {
                                     }
                                 }
                             } else {
-                                Log.w(TAG, "PARENTAL_RATING_DEBUG: Service BLOCKED by parental control! " +
-                                    "serviceRating=" + serviceRating + 
-                                    " > parentalControlAge=" + parentalControlAge);
-                                Log.i(TAG, "Service is blocked by parental control.");
+                                Log.w(TAG, "PARENTAL_RATING: Service BLOCKED by parental control! " +
+                                    "serviceRating=" + serviceRating + " > parentalControlAge=" + parentalControlAge);
                                 mBlocked = true;
                                 launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1_1), LINKED_APP_SCHEME_1_1);
                                 handleRatingBlocked(channel);
@@ -207,10 +204,8 @@ public class DvbIClient {
             int parentalControlAge = mTvInputCallback.getParentalControlAge();
             int programmeMinAge = programme != null ? programme.getMinimumAge() : 0;
             boolean blocked = programme != null && programmeMinAge > parentalControlAge;
-            Log.d(TAG, "PARENTAL_RATING_DEBUG: onNowProgrammeUpdated - programme=" + programme + 
-                ", programmeMinAge=" + programmeMinAge + 
-                ", parentalControlAge=" + parentalControlAge + 
-                ", blocked=" + blocked);
+            Log.d(TAG, "PARENTAL_RATING_DEBUG: onNowProgrammeUpdated - programme=" + programme +
+                ", programmeMinAge=" + programmeMinAge + ", parentalControlAge=" + parentalControlAge + ", blocked=" + blocked);
             Log.i(TAG, "Now programme updated: " + programme);
             if (mBlocked != blocked) {
                 mBlocked = blocked;
@@ -237,41 +232,38 @@ public class DvbIClient {
                 // Check if channel change is in progress (in a transitional state, not a final state)
                 // Final states are: PLAYING, BLOCKED, ERROR, BAD_CONNECTION
                 // If we're not in a final state, we're in a transitional state and should complete the change first
-                boolean isFinalState = PLAYER_STATUS_PLAYING.equals(mLastState) || 
-                    PLAYER_STATUS_BLOCKED.equals(mLastState) || 
-                    PLAYER_STATUS_ERROR.equals(mLastState) || 
+                boolean isFinalState = PLAYER_STATUS_PLAYING.equals(mLastState) ||
+                    PLAYER_STATUS_BLOCKED.equals(mLastState) ||
+                    PLAYER_STATUS_ERROR.equals(mLastState) ||
                     PLAYER_STATUS_BAD_CONNECTION.equals(mLastState);
                 boolean channelChangeInProgress = !isFinalState;
-                
+
                 if (channelChangeInProgress) {
                     // Complete the channel change to SUCCEEDED state first, but stop playback immediately
                     // to prevent entering PRESENTING state
-                    Log.i(TAG, "DEBUG_CHANNEL_STATUS: Channel change in progress when parental rating blocked (mLastState=" + mLastState + 
-                        "). Completing channel change first, but stopping playback immediately.");
-                    
-                    // Stop playback immediately (synchronously) to prevent PRESENTING state
-                    Log.i(TAG, "DEBUG_CHANNEL_STATUS: Calling tuneOff() to stop playback");
+                    Log.i(TAG, "CHANNEL_STATUS: Channel change in progress when parental rating blocked (mLastState=" + mLastState +
+                        "). Calling tuneOff() to stop playback immediately.");
                     mDvbIView.tuneOff();
                     mTracks.clear();
                     mSelectedTracks.clear();
                     mIsUnselected.clear();
                     mTvInputCallback.tuneOffBroadcast();
-                    
+
                     // Send BLOCKED status FIRST to prevent player from entering PRESENTING
                     // This must come before STARTING to ensure the player is blocked before it can start
-                    Log.i(TAG, "DEBUG_CHANNEL_STATUS: Sending BLOCKED status FIRST (before STARTING)");
+                    Log.i(TAG, "CHANNEL_STATUS: Sending BLOCKED status FIRST (before STARTING)");
                     mLastState = PLAYER_STATUS_BLOCKED;
                     dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_BLOCKED);
-                    
+
                     // Then send STARTING status (maps to CONNECTING, not PRESENTING) to complete the channel change
                     // We use STARTING instead of PLAYING to avoid PRESENTING state
                     // STARTING (129) -> CHANNEL_STATUS_CONNECTING (-2) allows ChannelChangeSucceeded but prevents PRESENTING
-                    Log.i(TAG, "DEBUG_CHANNEL_STATUS: Sending STARTING status (CHANNEL_CHANGE_STARTING) AFTER BLOCKED - maps to CONNECTING, not PRESENTING");
+                    Log.i(TAG, "CHANNEL_STATUS: Sending STARTING status AFTER BLOCKED - maps to CONNECTING, not PRESENTING");
                     mLastState = PLAYER_STATUS_STARTING;
                     dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
-                    
+
                     // Update state back to BLOCKED and set up error timer
-                    Log.i(TAG, "DEBUG_CHANNEL_STATUS: Setting mLastState back to BLOCKED");
+                    Log.i(TAG, "CHANNEL_STATUS: Setting mLastState back to BLOCKED");
                     mLastState = PLAYER_STATUS_BLOCKED;
                     invalidateErrorTimer();
                     mPermanentErrorTimer = new Timer();
@@ -504,12 +496,16 @@ public class DvbIClient {
                 tsid = triplet.getTsId();
                 sid = triplet.getServiceId();
             }
+            Log.i(TAG, "handleChannelStatusChange; onid=" + onid + ", tsid=" + tsid + ", sid=" + sid + ", event=" + eventName);
             dispatchPlayerStatusChangedEvent(onid, tsid, sid, eventName);
             switch (eventName) {
                 case PLAYER_STATUS_PLAYING:
                     mLastState = PLAYER_STATUS_PLAYING;
                     DvbIChannelAdapter channel = mServiceManager.getTunedChannel();
-                    if (channel != null) {
+                    if (channel == null) {
+                        Log.e(TAG, "mServiceManager; No tuned channel");
+                    }
+                    else {
                         mTvInputCallback.notifyVideoAvailable();
                         String appUri = channel.getLinkedAppUri(LINKED_APP_SCHEME_1_1);
                         if (appUri != null) {
@@ -1116,11 +1112,11 @@ public class DvbIClient {
 
     private void dispatchPlayerStatusChangedEvent(int onid, int tsid, int sid, String event) {
         Integer statusCode = HBBTV_CHANNEL_STATUS_LOOKUP.get(event);
-        Log.i(TAG, "DEBUG_CHANNEL_STATUS: dispatchPlayerStatusChangedEvent called - onid=" + onid + 
-            ", tsid=" + tsid + ", sid=" + sid + ", event=" + event + 
+        Log.i(TAG, "dispatchPlayerStatusChangedEvent called - onid=" + onid +
+            ", tsid=" + tsid + ", sid=" + sid + ", event=" + event +
             ", statusCode=" + statusCode + ", mLastState=" + mLastState);
         for (HbbTVCallback handler : mHbbTVCallbacks) {
-            Log.i(TAG, "DEBUG_CHANNEL_STATUS: Calling onChannelChangeStatus on HbbTVCallback - statusCode=" + statusCode);
+            Log.i(TAG, "Calling onChannelChangeStatus on HbbTVCallback - statusCode=" + statusCode);
             handler.onChannelChangeStatus(onid, tsid, sid, statusCode);
         }
         for (DvbCallback handler : mDvbCallbacks) {
