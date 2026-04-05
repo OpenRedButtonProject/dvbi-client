@@ -118,6 +118,7 @@ public class DvbIClient {
                     Log.i(TAG, "---------- channel info ----------\n" + channel + "\n------------------------------------");
                     String app_1_2 = channel.getLinkedAppUri(LINKED_APP_SCHEME_1_2);
                     if (app_1_2 == null) {
+                        launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1_1), LINKED_APP_SCHEME_1_1);
                         if (!mBlocked) {
                             Integer serviceRating = service.getParentalRating();
                             int parentalControlAge = mTvInputCallback.getParentalControlAge();
@@ -147,16 +148,15 @@ public class DvbIClient {
                                 Log.w(TAG, "PARENTAL_RATING: Service BLOCKED by parental control! " +
                                     "serviceRating=" + serviceRating + " > parentalControlAge=" + parentalControlAge);
                                 mBlocked = true;
-                                launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1_1), LINKED_APP_SCHEME_1_1);
                                 handleRatingBlocked(channel);
                             }
                         }
                         else {
-                            launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1_1), LINKED_APP_SCHEME_1_1);
                             handleRatingBlocked(channel);
                             Log.i(TAG, "Now programme is blocked by parental control.");
                         }
                     } else {
+                        launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1_2), LINKED_APP_SCHEME_1_2);
                         mTvInputCallback.tuneOffBroadcast();
                         mDvbIView.tuneOff();
                         if (!PLAYER_STATUS_STARTING.equals(mLastState)) {
@@ -164,7 +164,6 @@ public class DvbIClient {
                             dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
                         }
                         mTvInputCallback.notifyVideoAvailable();
-                        launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1_2), LINKED_APP_SCHEME_1_2);
                     }
 
                     int index = service.getInstances().indexOf(toInstance);
@@ -507,11 +506,6 @@ public class DvbIClient {
                     }
                     else {
                         mTvInputCallback.notifyVideoAvailable();
-                        String appUri = channel.getLinkedAppUri(LINKED_APP_SCHEME_1_1);
-                        if (appUri != null) {
-                            Log.i(TAG, "Found Hbbtv App with scheme '" + LINKED_APP_SCHEME_1_1 + "' from Related Materials (" + appUri + ")");
-                            new GetXmlAitTask().execute(new XmlAitAttributes(appUri, LINKED_APP_SCHEME_1_1));
-                        }
                     }
                     break;
                 case PLAYER_STATUS_BAD_CONNECTION:
@@ -529,7 +523,7 @@ public class DvbIClient {
                     try {
                         String messageData = data.getString("messageData");
                         for (Callback cb : mCallbacks) {
-                            cb.onProcessXmlAit(messageData, LINKED_APP_SCHEME_1_1);
+                            cb.onProcessXmlAit(messageData, PLAYER_EVENT_APP_SIGNALLING);
                         }
                     } catch (Exception e) {
                         e.printStackTrace();
