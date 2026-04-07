@@ -166,10 +166,14 @@ public class DvbIClient {
                         mTvInputCallback.notifyVideoAvailable();
                     }
 
-                    int index = service.getInstances().indexOf(toInstance);
-                    for (HbbTVCallback handler : mHbbTVCallbacks) {
-                        handler.onServiceInstanceChange(index);
-                    }
+                    final int index = service.getInstances().indexOf(toInstance);
+                    // tune()/tuneOff() post to the main executor; notify HbbTV after that work is
+                    // queued so ServiceInstanceChanged is not delivered before loadUrl/orb_loadMedia runs.
+                    mDvbIView.getContext().getMainExecutor().execute(() -> {
+                        for (HbbTVCallback handler : mHbbTVCallbacks) {
+                            handler.onServiceInstanceChange(index);
+                        }
+                    });
                 } else {
                     Log.i(TAG, "No service instance is currently available.");
                     mTvInputCallback.tuneOffBroadcast();
