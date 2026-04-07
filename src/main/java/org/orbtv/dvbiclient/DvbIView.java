@@ -24,6 +24,13 @@ public class DvbIView extends WebView {
     private int mViewWidth = 0; // Await onLayoutChange to calculate View width
     private int mAppWidth = 1280; // Apps are 1280 by default
 
+    /** Last video rectangle from the platform; applied once the DVBI page has finished loading. */
+    private int mVideoRectX;
+    private int mVideoRectY;
+    private int mVideoRectW;
+    private int mVideoRectH;
+    private boolean mVideoRectValid = false;
+
     private final ArrayList<JSCallback> mJSCallbacks = new ArrayList<>();
 
     public class JavaScriptInterface {
@@ -99,6 +106,7 @@ public class DvbIView extends WebView {
                     synchronized (mPageLoaded) {
                         evaluateJavascript("orb_loadMedia('" + mLastUrl + "', " + mSubsEnabled + ")", null);
                         mPageLoaded = true;
+                        applyVideoRectangleJs();
                     }
                 }
             }
@@ -151,9 +159,25 @@ public class DvbIView extends WebView {
 
     public void setVideoRectangle(int x, int y, int width, int height) {
         mContext.getMainExecutor().execute(() -> {
-            evaluateJavascript("orb_setVideoRectangle(" + x + "," + y + ","
-                    + width + "," + height + ")", null);
+            synchronized (mPageLoaded) {
+                mVideoRectX = x;
+                mVideoRectY = y;
+                mVideoRectW = width;
+                mVideoRectH = height;
+                mVideoRectValid = true;
+                if (Boolean.TRUE.equals(mPageLoaded) && DVBI_PAGE.equals(getUrl())) {
+                    applyVideoRectangleJs();
+                }
+            }
         });
+    }
+
+    private void applyVideoRectangleJs() {
+        if (!mVideoRectValid) {
+            return;
+        }
+        evaluateJavascript("orb_setVideoRectangle(" + mVideoRectX + "," + mVideoRectY + ","
+                + mVideoRectW + "," + mVideoRectH + ")", null);
     }
 
     public void selectTrack(String type, String id) {
