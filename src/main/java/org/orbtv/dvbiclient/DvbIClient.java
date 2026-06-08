@@ -137,10 +137,18 @@ public class DvbIClient {
                                     mTracks.clear();
                                     mSelectedTracks.clear();
                                     mIsUnselected.clear();
-                                    if (toInstance.getTriplet() != null) {
-                                        mTvInputCallback.tuneBroadcast(toInstance.getTriplet().toString());
-                                    }
-                                    else {
+                                    Triplet rfTriplet = toInstance.getTriplet();
+                                    if (rfTriplet != null) {
+                                        if (!PLAYER_STATUS_STARTING.equals(mLastState)) {
+                                            mLastState = PLAYER_STATUS_STARTING;
+                                            dispatchPlayerStatusChangedEvent(
+                                                rfTriplet.getOrigNetId(),
+                                                rfTriplet.getTsId(),
+                                                rfTriplet.getServiceId(),
+                                                PLAYER_STATUS_STARTING);
+                                        }
+                                        mTvInputCallback.tuneBroadcast(rfTriplet.toString());
+                                    } else {
                                         mDvbIView.tuneOff();
                                     }
                                 }
@@ -489,11 +497,10 @@ public class DvbIClient {
         }
 
         private synchronized void handleChannelStatusChange(String eventName) {
-            Service service = mServiceManager.getTunedService();
-            Triplet triplet = service.getTriplet();
             int onid = 0;
             int tsid = 0;
             int sid = 0;
+            Triplet triplet = getHbbtvChannelStatusTriplet();
             if (triplet != null) {
                 onid = triplet.getOrigNetId();
                 tsid = triplet.getTsId();
@@ -1108,14 +1115,40 @@ public class DvbIClient {
             .build();
     }
 
+    /**
+     * Triplet for HbbTV channel-status events: prefer the active delivery instance
+     * (e.g. RF 99:1:12) over the DVB-I service-identifier triplet (e.g. 5:2774:2).
+     */
+    private Triplet getHbbtvChannelStatusTriplet() {
+        ServiceInstance instance = mServiceManager.getTunedInstance();
+        if (instance != null && instance.getTriplet() != null) {
+            return instance.getTriplet();
+        }
+        Service service = mServiceManager.getTunedService();
+        if (service != null && service.getTriplet() != null) {
+            return service.getTriplet();
+        }
+        DvbIChannelAdapter channel = mServiceManager.getTunedChannel();
+        if (channel != null) {
+            return new Triplet.Builder()
+                .setOrigNetId(channel.getOnid())
+                .setTsId(channel.getTsid())
+                .setServiceId(channel.getSid())
+                .build();
+        }
+        return null;
+    }
+
     private void dispatchPlayerStatusChangedEvent(int onid, int tsid, int sid, String event) {
         Integer statusCode = HBBTV_CHANNEL_STATUS_LOOKUP.get(event);
         Log.i(TAG, "dispatchPlayerStatusChangedEvent called - onid=" + onid +
             ", tsid=" + tsid + ", sid=" + sid + ", event=" + event +
             ", statusCode=" + statusCode + ", mLastState=" + mLastState);
-        for (HbbTVCallback handler : mHbbTVCallbacks) {
-            Log.i(TAG, "Calling onChannelChangeStatus on HbbTVCallback - statusCode=" + statusCode);
-            handler.onChannelChangeStatus(onid, tsid, sid, statusCode);
+        if (statusCode != null) {
+            for (HbbTVCallback handler : mHbbTVCallbacks) {
+                Log.i(TAG, "Calling onChannelChangeStatus on HbbTVCallback - statusCode=" + statusCode);
+                handler.onChannelChangeStatus(onid, tsid, sid, statusCode);
+            }
         }
         for (DvbCallback handler : mDvbCallbacks) {
             handler.onPlayerStatusChanged(event);
