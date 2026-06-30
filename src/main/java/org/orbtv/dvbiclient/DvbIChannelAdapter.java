@@ -65,10 +65,11 @@ public class DvbIChannelAdapter {
                 }
             }
         }
-        // Fallback to parent service's unique identifier if UriBasedLocation is still not available
-        this.mIpBroadcastID = (uriBasedLocation != null && !uriBasedLocation.isEmpty()) 
-                ? uriBasedLocation 
-                : (parentService != null ? parentService.getUniqueIdentifier() : null);
+        // RF-delivered service instances do not have an IP broadcast ID unless one is
+        // explicitly signalled on the instance.
+        this.mIpBroadcastID = (uriBasedLocation != null && !uriBasedLocation.isEmpty())
+                ? uriBasedLocation
+                : null;
         this.mTerminalChannel = determineTerminalChannel(instance);
         determineApps(instance, parentService);
     }
