@@ -133,22 +133,37 @@ public class DvbIClient {
                                         dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
                                     }
                                 } else {
+                                    Log.i(TAG, "RF_TUNE_DEBUG: switching to broadcast instance, deliveryType="
+                                        + toInstance.getDeliveryType() + ", mLastState=" + mLastState);
                                     mDvbIView.tuneOff();
                                     mTracks.clear();
                                     mSelectedTracks.clear();
                                     mIsUnselected.clear();
                                     Triplet rfTriplet = toInstance.getTriplet();
                                     if (rfTriplet != null) {
-                                        if (!PLAYER_STATUS_STARTING.equals(mLastState)) {
-                                            mLastState = PLAYER_STATUS_STARTING;
+                                        Log.i(TAG, "RF_TUNE_DEBUG: rfTriplet=" + rfTriplet);
+                                        Log.i(TAG, "RF_TUNE_DEBUG: calling tuneBroadcast(" + rfTriplet + ")");
+                                        boolean tuned = mTvInputCallback.tuneBroadcast(rfTriplet.toString());
+                                        if (tuned) {
+                                            if (!PLAYER_STATUS_STARTING.equals(mLastState)) {
+                                                mLastState = PLAYER_STATUS_STARTING;
+                                                dispatchPlayerStatusChangedEvent(
+                                                    rfTriplet.getOrigNetId(),
+                                                    rfTriplet.getTsId(),
+                                                    rfTriplet.getServiceId(),
+                                                    PLAYER_STATUS_STARTING);
+                                            }
+                                        } else {
+                                            Log.e(TAG, "RF_TUNE_DEBUG: tuneBroadcast failed for " + rfTriplet);
+                                            mLastState = PLAYER_STATUS_ERROR;
                                             dispatchPlayerStatusChangedEvent(
                                                 rfTriplet.getOrigNetId(),
                                                 rfTriplet.getTsId(),
                                                 rfTriplet.getServiceId(),
-                                                PLAYER_STATUS_STARTING);
+                                                PLAYER_STATUS_ERROR);
                                         }
-                                        mTvInputCallback.tuneBroadcast(rfTriplet.toString());
                                     } else {
+                                        Log.w(TAG, "RF_TUNE_DEBUG: no RF triplet on broadcast instance, tuneOff only");
                                         mDvbIView.tuneOff();
                                     }
                                 }
@@ -506,16 +521,20 @@ public class DvbIClient {
                 tsid = triplet.getTsId();
                 sid = triplet.getServiceId();
             }
-            Log.i(TAG, "handleChannelStatusChange; onid=" + onid + ", tsid=" + tsid + ", sid=" + sid + ", event=" + eventName);
+            ServiceInstance tunedInstance = mServiceManager.getTunedInstance();
+            Log.i(TAG, "handleChannelStatusChange; onid=" + onid + ", tsid=" + tsid + ", sid=" + sid
+                + ", event=" + eventName + ", mLastState=" + mLastState
+                + ", tunedInstance=" + (tunedInstance != null ? tunedInstance.getDeliveryType() + ":" + tunedInstance.getTriplet() : "null"));
             dispatchPlayerStatusChangedEvent(onid, tsid, sid, eventName);
             switch (eventName) {
                 case PLAYER_STATUS_PLAYING:
                     mLastState = PLAYER_STATUS_PLAYING;
                     DvbIChannelAdapter channel = mServiceManager.getTunedChannel();
                     if (channel == null) {
-                        Log.e(TAG, "mServiceManager; No tuned channel");
+                        Log.e(TAG, "RF_TUNE_DEBUG: PLAYING received but no tuned channel; notifyVideoAvailable skipped");
                     }
                     else {
+                        Log.i(TAG, "RF_TUNE_DEBUG: PLAYING received, calling notifyVideoAvailable");
                         mTvInputCallback.notifyVideoAvailable();
                     }
                     break;
@@ -554,9 +573,13 @@ public class DvbIClient {
         mDvbIView.addJSCallback(mJSCallback);
         mEpgManager = new EpgManager(mDbHandler);
         mEpgManager.registerCallback(serviceUIDs -> {
-            Log.i(TAG, "Updated EPG for service UIDs" + serviceUIDs);
+            long startMs = System.currentTimeMillis();
+            Log.i(TAG, "EPG_DEBUG: onEpgUpdated on thread=" + Thread.currentThread().getName()
+                + ", serviceCount=" + serviceUIDs.size() + ", uids=" + serviceUIDs);
             mUpdatedServiceEPGs = serviceUIDs;
             mTvInputCallback.updateEventPeriods();
+            Log.i(TAG, "EPG_DEBUG: onEpgUpdated completed in "
+                + (System.currentTimeMillis() - startMs) + "ms");
         });
         mServiceManager = new TunedServiceManager(mEpgManager, mDbHandler);
         mServiceManager.registerCallback(mServiceManagerCallback);

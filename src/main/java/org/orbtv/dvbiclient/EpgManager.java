@@ -398,6 +398,11 @@ public class EpgManager {
 
         @Override
         public void onPostExecute(ArrayList<Programme> programmes) {
+            long startMs = System.currentTimeMillis();
+            Log.i(TAG, "EPG_DEBUG: onPostExecute start thread=" + Thread.currentThread().getName()
+                + ", serviceUID=" + mTaskInfo.getServiceUID()
+                + ", programmeCount=" + (programmes != null ? programmes.size() : 0)
+                + ", pendingTasks=" + mEpgMetadataTasks.size());
             synchronized (mLock) {
                 if (programmes != null) {
                     mDbHandler.updateProgrammesForService(mTaskInfo.getServiceUID(), programmes);
@@ -405,12 +410,15 @@ public class EpgManager {
                 mEpgMetadataTasks.remove(this);
                 if (mEpgMetadataTasks.isEmpty() && !mUpdatedServices.isEmpty()) {
                     List<String> updatedServices = new ArrayList<>(mUpdatedServices);
+                    Log.i(TAG, "EPG_DEBUG: firing onEpgUpdated for " + updatedServices.size() + " services");
                     for (Callback callback : mCallbacks) {
                         callback.onEpgUpdated(updatedServices);
                     }
                     mUpdatedServices.clear();
                 }
             }
+            Log.i(TAG, "EPG_DEBUG: onPostExecute done in "
+                + (System.currentTimeMillis() - startMs) + "ms, serviceUID=" + mTaskInfo.getServiceUID());
         }
     }
 
