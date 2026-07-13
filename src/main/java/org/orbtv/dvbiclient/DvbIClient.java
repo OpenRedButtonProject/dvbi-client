@@ -484,17 +484,21 @@ public class DvbIClient {
                         .setEncoding(track.getString("encoding"));
                 switch (trackType) {
                     case TvTrackInfo.TYPE_AUDIO:
-                        if ("descriptions".equals(track.getString("kind"))) {
+                        if ("descriptions".equals(track.optString("kind", ""))) {
                             builder.setDescription("AD")
                                     .setAudioDescription(true);
                         }
-                        builder.setAudioChannelCount(track.getInt("audioChannelConfiguration"));
+                        if (!track.isNull("audioChannelConfiguration")) {
+                            builder.setAudioChannelCount(track.getInt("audioChannelConfiguration"));
+                        }
                         break;
                     case TvTrackInfo.TYPE_VIDEO:
-                        builder.setVideoPixelAspectRatio((float)track.getDouble("aspectRatio"));
+                        if (!track.isNull("aspectRatio")) {
+                            builder.setVideoPixelAspectRatio((float)track.getDouble("aspectRatio"));
+                        }
                         break;
                     case TvTrackInfo.TYPE_SUBTITLE:
-                        if ("hearingImpaired".equals(track.getString("kind"))) {
+                        if ("hearingImpaired".equals(track.optString("kind", ""))) {
                             builder.setHardOfHearing(true);
                         }
                         break;

@@ -12,8 +12,42 @@
         let _subs;
         let _eventStreams = { }
         const _events = { };
+        let _playbackWatchdog = null;
+        let _playingNotified = false;
         const PLAYER_EVENT_APP_SIGNALLING = "urn:dvb:dash:appsignalling:2016";
         const PLAYER_EVENT_EPG_METADATA = "urn:dvb:iptv:cpm:2014";
+        const PLAYBACK_WATCHDOG_MS = 10000;
+
+        function _notifyPlaying(reason) {
+            if (_playingNotified) {
+                return;
+            }
+            // Publish tracks before PLAYING so getComponentList can see active audio/video.
+            try {
+                updateTracks();
+            } catch (e) {
+                console.warn('updateTracks before PLAYING failed', e);
+            }
+            _playingNotified = true;
+            if (_playbackWatchdog) {
+                clearTimeout(_playbackWatchdog);
+                _playbackWatchdog = null;
+            }
+            console.log("DVBI_PLAYBACK_PLAYING (" + reason + ")");
+            Android.onVideoEvent('DVBI_PLAYBACK_PLAYING', JSON.stringify({ reason: reason }));
+        }
+
+        function _startPlaybackWatchdog() {
+            if (_playbackWatchdog) {
+                clearTimeout(_playbackWatchdog);
+            }
+            _playbackWatchdog = setTimeout(function() {
+                if (!_playingNotified) {
+                    console.warn("Playback watchdog: firing PLAYING fallback");
+                    _notifyPlaying('watchdog');
+                }
+            }, PLAYBACK_WATCHDOG_MS);
+        }
 
         function _onManifestLoaded(e) {
             console.log("manifest data:", e);
@@ -235,13 +269,32 @@
             _subs = document.getElementById("orb_subsPH");
             _video = document.getElementById("orb_video");
             _player = orb_dashjs.MediaPlayer().create();
+            _player.updateSettings({
+                streaming: {
+                    retryAttempts: 5,
+                    retryIntervals: 500
+                }
+            });
             _player.initialize(_video, undefined, true);
             _player.attachTTMLRenderingDiv(_subs);
 
-            _player.on('manifestLoaded', _onManifestLoaded);
+            _player.on('manifestLoaded', function(e) {
+                _onManifestLoaded(e);
+                _player.play();
+            });
 
             _player.on(orb_dashjs.MediaPlayer.events.PLAYBACK_PLAYING, function(e) {
-                Android.onVideoEvent('DVBI_PLAYBACK_PLAYING', JSON.stringify(e));
+                _notifyPlaying('dash-playback-playing');
+            });
+
+            _video.addEventListener('playing', function() {
+                _notifyPlaying('video-playing');
+            });
+
+            _video.addEventListener('canplay', function() {
+                if (_video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+                    _notifyPlaying('video-canplay');
+                }
             });
 
             _player.on(orb_dashjs.MediaPlayer.events.PLAYBACK_ERROR, function(e) {
@@ -267,60 +320,68 @@
 
             _player.on('currentTrackChanged', (e) => {
                 Android.onVideoEvent('DVBI_TRACK_CHANGED', JSON.stringify(_getTrackDataFromMediaInfo(e.newMediaInfo), true));
+                updateTracks();
             });
 
-            function updateTracks(e) {
-                const curAudio = _player.getCurrentTrackFor('audio');
-                const curVideo = _player.getCurrentTrackFor('video');
-                const curText = _player.getCurrentTrackFor('text');
-                const streamInfo = _player.getActiveStream().getStreamInfo();
-                const dashAdapter = _player.getDashAdapter();
-                const dashMetrics = _player.getDashMetrics();
-                let currentVideoRep = null, currentAudioRep = null, currentTextRep = null;
-                if (streamInfo) {
-                    const periodIdx = streamInfo.index;
-                    const videoAdaptation = dashAdapter.getAdaptationForType(periodIdx, 'video', streamInfo);
-                    const videoRepSwitch = dashMetrics.getCurrentRepresentationSwitch('video', true);
-                    if (videoAdaptation && videoRepSwitch) {
-                        currentVideoRep = videoAdaptation.Representation_asArray.find(function (rep) {
-                            return rep.id === videoRepSwitch.to
-                        });
-                    }
-                    const audioAdaptation = dashAdapter.getAdaptationForType(periodIdx, 'audio', streamInfo);
-                    const audioRepSwitch = dashMetrics.getCurrentRepresentationSwitch('audio', true);
-                    if (audioAdaptation && audioRepSwitch) {
-                        currentAudioRep = audioAdaptation.Representation_asArray.find(function (rep) {
-                            return rep.id === audioRepSwitch.to
-                        });
-                    }
-                    const textAdaptation = dashAdapter.getAdaptationForType(periodIdx, 'text', streamInfo);
-                    const textRepSwitch = dashMetrics.getCurrentRepresentationSwitch('text', true);
-                    if (textAdaptation && textRepSwitch) {
-                        currentTextRep = textAdaptation.Representation_asArray.find(function (rep) {
-                            return rep.id === textRepSwitch.to
-                        });
-                    }
-                }
-                //console.log(JSON.stringify(currentVideoRep));
-                //console.log(JSON.stringify(currentAudioRep));
-                //console.log(JSON.stringify(currentTextRep));
-                var tracks = {
-                    audio: _player.getTracksFor('audio').map(track => {
-                        return _getTrackDataFromMediaInfo(track, track === curAudio, currentAudioRep);
-                    }).filter(track => track !== undefined),
-                    video: _player.getTracksFor('video').map(track => {
-                        return _getTrackDataFromMediaInfo(track, track === curVideo, currentVideoRep);
-                    }).filter(track => track !== undefined),
-                    text: _player.getTracksFor('text').map(track => {
-                        return _getTrackDataFromMediaInfo(track, track === curText, currentTextRep);
-                    }).filter(track => track !== undefined)
-                };
-                console.log("tracks:", tracks);
-                Android.onVideoEvent('DVBI_TRACKS_UPDATED', JSON.stringify(tracks));
-            }
+            _player.on('streamInitialized', updateTracks);
             _player.on('periodSwitchCompleted', updateTracks);
         }
+
+        function updateTracks(e) {
+            if (!_player) {
+                return;
+            }
+            const activeStream = _player.getActiveStream && _player.getActiveStream();
+            if (!activeStream) {
+                return;
+            }
+            const curAudio = _player.getCurrentTrackFor('audio');
+            const curVideo = _player.getCurrentTrackFor('video');
+            const curText = _player.getCurrentTrackFor('text');
+            const streamInfo = activeStream.getStreamInfo();
+            const dashAdapter = _player.getDashAdapter();
+            const dashMetrics = _player.getDashMetrics();
+            let currentVideoRep = null, currentAudioRep = null, currentTextRep = null;
+            if (streamInfo) {
+                const periodIdx = streamInfo.index;
+                const videoAdaptation = dashAdapter.getAdaptationForType(periodIdx, 'video', streamInfo);
+                const videoRepSwitch = dashMetrics.getCurrentRepresentationSwitch('video', true);
+                if (videoAdaptation && videoRepSwitch) {
+                    currentVideoRep = videoAdaptation.Representation_asArray.find(function (rep) {
+                        return rep.id === videoRepSwitch.to
+                    });
+                }
+                const audioAdaptation = dashAdapter.getAdaptationForType(periodIdx, 'audio', streamInfo);
+                const audioRepSwitch = dashMetrics.getCurrentRepresentationSwitch('audio', true);
+                if (audioAdaptation && audioRepSwitch) {
+                    currentAudioRep = audioAdaptation.Representation_asArray.find(function (rep) {
+                        return rep.id === audioRepSwitch.to
+                    });
+                }
+                const textAdaptation = dashAdapter.getAdaptationForType(periodIdx, 'text', streamInfo);
+                const textRepSwitch = dashMetrics.getCurrentRepresentationSwitch('text', true);
+                if (textAdaptation && textRepSwitch) {
+                    currentTextRep = textAdaptation.Representation_asArray.find(function (rep) {
+                        return rep.id === textRepSwitch.to
+                    });
+                }
+            }
+            var tracks = {
+                audio: _player.getTracksFor('audio').map(track => {
+                    return _getTrackDataFromMediaInfo(track, track === curAudio, currentAudioRep);
+                }).filter(track => track !== undefined),
+                video: _player.getTracksFor('video').map(track => {
+                    return _getTrackDataFromMediaInfo(track, track === curVideo, currentVideoRep);
+                }).filter(track => track !== undefined),
+                text: _player.getTracksFor('text').map(track => {
+                    return _getTrackDataFromMediaInfo(track, track === curText, currentTextRep);
+                }).filter(track => track !== undefined)
+            };
+            console.log("tracks:", tracks);
+            Android.onVideoEvent('DVBI_TRACKS_UPDATED', JSON.stringify(tracks));
+        }
         function orb_loadMedia(url, enableSubs) {
+            _playingNotified = false;
             if (_lastSource !== url) {
                 _lastSource = url;
                 for (const e in _events) {
@@ -328,10 +389,15 @@
                     _player.off(e, _streamEventHandler);
                 }
                 _player.attachSource(url);
+                _player.play();
+                _startPlaybackWatchdog();
             }
             else {
                 if (_video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-                    Android.onVideoEvent('DVBI_PLAYBACK_PLAYING', JSON.stringify({}));
+                    _notifyPlaying('cached-source');
+                } else {
+                    _player.play();
+                    _startPlaybackWatchdog();
                 }
             }
             _setTrackEnabled("video", true);
