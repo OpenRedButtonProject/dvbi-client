@@ -218,6 +218,7 @@ public class DvbIClient {
                         launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1000_1), LINKED_APP_SCHEME_1000_1);
                         mDvbIView.getContext().getMainExecutor().execute(() -> {
                             mDvbIView.setVisibility(View.VISIBLE);
+                            mDvbIView.clearFocus();
                             mDvbIView.loadUrl(channel.getLinkedAppUri(LINKED_APP_SCHEME_1000_1));
                         });
                     }

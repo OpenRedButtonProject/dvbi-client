@@ -73,6 +73,13 @@ public class DvbIView extends WebView {
         super(context);
         mContext = context;
 
+        // Media player WebView only — must not steal Live Channels digit / channel keys.
+        // Linked HbbTV apps run in the ORB browser, not here.
+        setFocusable(false);
+        setFocusableInTouchMode(false);
+        setClickable(false);
+        setLongClickable(false);
+
         setBackgroundColor(Color.TRANSPARENT);
         getSettings().setJavaScriptEnabled(true);
         getSettings().setMediaPlaybackRequiresUserGesture(false);
@@ -119,6 +126,20 @@ public class DvbIView extends WebView {
         });
     }
 
+    /**
+     * Always non-focusable: this WebView is the DVB-I AV player, not an input surface.
+     * Ignores callers (e.g. OverlayView setInteractive) that would re-enable focus.
+     */
+    @Override
+    public void setFocusable(boolean focusable) {
+        super.setFocusable(false);
+    }
+
+    @Override
+    public void setFocusableInTouchMode(boolean focusableInTouchMode) {
+        super.setFocusableInTouchMode(false);
+    }
+
     public void addJSCallback(JSCallback handler) {
         if (!mJSCallbacks.contains(handler)) {
             mJSCallbacks.add(handler);
@@ -141,6 +162,7 @@ public class DvbIView extends WebView {
                         this.loadUrl(DVBI_PAGE);
                         if (!mIsSuspended) {
                             this.setVisibility(View.VISIBLE);
+                            this.clearFocus();
                         }
                     } else if (mPageLoaded) {
                         evaluateJavascript("orb_loadMedia('" + mLastUrl + "', " + enableSubs + ")", null);
@@ -216,6 +238,7 @@ public class DvbIView extends WebView {
                     } else if (mPageLoaded) {
                         this.onResume();
                         this.setVisibility(View.VISIBLE);
+                        this.clearFocus();
                     }
                 });
             }
