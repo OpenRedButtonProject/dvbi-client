@@ -57,11 +57,11 @@ public class Service implements IService {
     }
 
     public String getUniqueIdentifier() { return mUniqueIdentifier; }
-    
+
     public Map<String, String> getDisplayNames() { return mServiceNames; }
 
     public String getProviderName() { return mProviderName; }
- 
+
     public String getServiceType() { return mServiceType; }
 
     public List<RelatedMaterial> getRelatedMaterials() { return mRelatedMaterials; }
@@ -110,6 +110,9 @@ public class Service implements IService {
         values.put(Service.DB_COLUMN_SERVICE_TYPE, mServiceType);
         values.put(Service.DB_COLUMN_CONTENT_GUIDE_CGSID, (mContentGuideSource == null ? null : mContentGuideSource.getCGSID()));
         values.put(Service.DB_COLUMN_CONTENT_GUIDE_SERVICE_REF, mContentGuideServiceRef);
+        if (mParentalRating != null) {
+            values.put(Service.DB_COLUMN_PARENTAL_RATING, mParentalRating);
+        }
         if (mTriplet != null) {
             try {
                 params.put("hbbtv-i:DVBTriplet", mTriplet);
@@ -151,7 +154,7 @@ public class Service implements IService {
                         case "ParentalRating":
                             String ratingText = xpp.nextText();
                             currentService.mParentalRating = Integer.parseInt(ratingText);
-                            Log.d(TAG, "PARENTAL_RATING_DEBUG: Parsed ParentalRating from service list: " + ratingText + 
+                            Log.d(TAG, "PARENTAL_RATING_DEBUG: Parsed ParentalRating from service list: " + ratingText +
                                 " for service: " + (currentService.mUniqueIdentifier != null ? currentService.mUniqueIdentifier : "unknown"));
                             break;
                         case "UniqueIdentifier":
