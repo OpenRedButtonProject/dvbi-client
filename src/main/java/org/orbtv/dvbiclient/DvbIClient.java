@@ -2,7 +2,6 @@ package org.orbtv.dvbiclient;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.media.tv.TvContentRating;
 import android.media.tv.TvInputManager;
 import android.media.tv.TvTrackInfo;
 import android.util.Log;
@@ -89,6 +88,8 @@ public class DvbIClient {
     private final ArrayList<HbbTVCallback> mHbbTVCallbacks = new ArrayList<>();
     private final ArrayList<Callback> mCallbacks = new ArrayList<>();
     private boolean mBlocked = false; // TODO: should it be part of TunedServiceManager?
+    /** Bumped at the start of each tune so stale now-programme callbacks cannot re-block the previous service. */
+    private volatile int mTuneGeneration = 0;
     private String mLastState; // TODO: should it be part of TunedServiceManager?
     private List<TvTrackInfo> mTracks = new ArrayList<>(); // TODO: should it be part of TunedServiceManager?
     private HashMap<Integer, TvTrackInfo> mSelectedTracks = new HashMap<>(); // TODO: should it be part of TunedServiceManager?
@@ -99,6 +100,9 @@ public class DvbIClient {
     private final TunedServiceManager mServiceManager;
     private List<String> mUpdatedServiceEPGs = new ArrayList<>();
     private Timer mPermanentErrorTimer;
+    private boolean mOverrideRequestPending = false;
+    private String mPendingLinkedAppUrl;
+    private String mPendingLinkedAppScheme;
     private final TunedServiceManager.Callback mServiceManagerCallback = new TunedServiceManager.Callback() {
         @Override
         public void onInstanceChanged(ServiceInstance fromInstance, ServiceInstance toInstance) {
@@ -118,75 +122,9 @@ public class DvbIClient {
                     Log.i(TAG, "---------- channel info ----------\n" + channel + "\n------------------------------------");
                     String app_1_2 = channel.getLinkedAppUri(LINKED_APP_SCHEME_1_2);
                     if (app_1_2 == null) {
-                        launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1_1), LINKED_APP_SCHEME_1_1);
-                        if (!mBlocked) {
-                            Integer serviceRating = service.getParentalRating();
-                            int parentalControlAge = mTvInputCallback.getParentalControlAge();
-                            Log.d(TAG, "PARENTAL_RATING: for service: " + service.getUniqueIdentifier() +
-                                ", serviceRating=" + serviceRating + ", parentalControlAge=" + parentalControlAge);
-                            if (serviceRating == null || serviceRating <= parentalControlAge) {
-                                Log.d(TAG, "PARENTAL_RATING: Service allowed. Proceeding with tune.");
-                                if ("dvb-dash".equals(toInstance.getDeliveryType())) {
-                                    mTvInputCallback.tuneOffBroadcast();
-                                    if (mDvbIView.tune(uri, mSubtitlesEnabled) && !PLAYER_STATUS_STARTING.equals(mLastState)) {
-                                        mLastState = PLAYER_STATUS_STARTING;
-                                        dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
-                                    }
-                                } else {
-                                    Log.i(TAG, "RF_TUNE_DEBUG: switching to broadcast instance, deliveryType="
-                                        + toInstance.getDeliveryType() + ", mLastState=" + mLastState);
-                                    mDvbIView.tuneOff();
-                                    mTracks.clear();
-                                    mSelectedTracks.clear();
-                                    mIsUnselected.clear();
-                                    Triplet rfTriplet = toInstance.getTriplet();
-                                    if (rfTriplet != null) {
-                                        Log.i(TAG, "RF_TUNE_DEBUG: rfTriplet=" + rfTriplet);
-                                        Log.i(TAG, "RF_TUNE_DEBUG: calling tuneBroadcast(" + rfTriplet + ")");
-                                        boolean tuned = mTvInputCallback.tuneBroadcast(rfTriplet.toString());
-                                        if (tuned) {
-                                            if (!PLAYER_STATUS_STARTING.equals(mLastState)) {
-                                                mLastState = PLAYER_STATUS_STARTING;
-                                                dispatchPlayerStatusChangedEvent(
-                                                    rfTriplet.getOrigNetId(),
-                                                    rfTriplet.getTsId(),
-                                                    rfTriplet.getServiceId(),
-                                                    PLAYER_STATUS_STARTING);
-                                            }
-                                        } else {
-                                            Log.e(TAG, "RF_TUNE_DEBUG: tuneBroadcast failed for " + rfTriplet);
-                                            mLastState = PLAYER_STATUS_ERROR;
-                                            dispatchPlayerStatusChangedEvent(
-                                                rfTriplet.getOrigNetId(),
-                                                rfTriplet.getTsId(),
-                                                rfTriplet.getServiceId(),
-                                                PLAYER_STATUS_ERROR);
-                                        }
-                                    } else {
-                                        Log.w(TAG, "RF_TUNE_DEBUG: no RF triplet on broadcast instance, tuneOff only");
-                                        mDvbIView.tuneOff();
-                                    }
-                                }
-                            } else {
-                                Log.w(TAG, "PARENTAL_RATING: Service BLOCKED by parental control! " +
-                                    "serviceRating=" + serviceRating + " > parentalControlAge=" + parentalControlAge);
-                                mBlocked = true;
-                                handleRatingBlocked(channel);
-                            }
-                        }
-                        else {
-                            handleRatingBlocked(channel);
-                            Log.i(TAG, "Now programme is blocked by parental control.");
-                        }
+                        handleNativeOrLinkedApp1_1(channel, toInstance, service, uri);
                     } else {
-                        launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1_2), LINKED_APP_SCHEME_1_2);
-                        mTvInputCallback.tuneOffBroadcast();
-                        mDvbIView.tuneOff();
-                        if (!PLAYER_STATUS_STARTING.equals(mLastState)) {
-                            mLastState = PLAYER_STATUS_STARTING;
-                            dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
-                        }
-                        mTvInputCallback.notifyVideoAvailable();
+                        handleLinkedApp1_2(channel, app_1_2, service);
                     }
 
                     final int index = service.getInstances().indexOf(toInstance);
@@ -228,23 +166,207 @@ public class DvbIClient {
 
         @Override
         public void onNowProgrammeUpdated(Programme programme) {
-            int parentalControlAge = mTvInputCallback.getParentalControlAge();
-            int programmeMinAge = programme != null ? programme.getMinimumAge() : 0;
-            boolean blocked = programme != null && programmeMinAge > parentalControlAge;
+            final int generation = mTuneGeneration;
+            Service service = mServiceManager.getTunedService();
+            if (service == null) {
+                return;
+            }
+            final String uid = service.getUniqueIdentifier();
+            int contentAge = 0;
+            if (programme != null && programme.getMinimumAge() > 0) {
+                contentAge = programme.getMinimumAge();
+            } else if (service.getParentalRating() != null) {
+                contentAge = service.getParentalRating();
+            }
+            int threshold = mTvInputCallback.getParentalControlAge();
+            // Block at-or-above threshold (age 18 content blocked when threshold is 18).
+            boolean naturallyBlocked = threshold > 0 && contentAge >= threshold;
+            boolean blocked = naturallyBlocked && !mTvInputCallback.isParentalAccessOverridden();
             Log.d(TAG, "PARENTAL_RATING_DEBUG: onNowProgrammeUpdated - programme=" + programme +
-                ", programmeMinAge=" + programmeMinAge + ", parentalControlAge=" + parentalControlAge + ", blocked=" + blocked);
+                ", contentAge=" + contentAge + ", parentalControlAge="
+                + threshold + ", blocked=" + blocked);
             Log.i(TAG, "Now programme updated: " + programme);
             if (mBlocked != blocked) {
+                if (generation != mTuneGeneration) {
+                    Log.i(TAG, "PARENTAL_RATING: ignoring now-programme update during tune");
+                    return;
+                }
+                Service still = mServiceManager.getTunedService();
+                if (still == null || !uid.equals(still.getUniqueIdentifier())) {
+                    Log.i(TAG, "PARENTAL_RATING: ignoring now-programme update for previous service");
+                    return;
+                }
+                boolean wasBlocked = mBlocked;
                 mBlocked = blocked;
                 invalidateErrorTimer();
+                if (wasBlocked && !blocked && !naturallyBlocked) {
+                    mTvInputCallback.clearParentalAccessOverride();
+                }
                 ServiceInstance instance = mServiceManager.getTunedInstance();
                 if (instance != null) {
                     onInstanceChanged(instance, instance);
                 }
-                for (HbbTVCallback callback : mHbbTVCallbacks) {
-                    callback.onParentalRatingChange(mBlocked);
+                if (generation == mTuneGeneration) {
+                    for (HbbTVCallback callback : mHbbTVCallbacks) {
+                        callback.onParentalRatingChange(mBlocked);
+                    }
                 }
             }
+        }
+
+        /**
+         * Native DASH / RF, with optional 1.1 media-in-parallel. Same PIN/destroy policy as 1.2:
+         * do not start the app or media while blocked; wait for HbbTV PIN overlay.
+         */
+        private void handleNativeOrLinkedApp1_1(DvbIChannelAdapter channel,
+                ServiceInstance toInstance, Service service, String uri) {
+            if (!isStillTuned(service)) {
+                Log.i(TAG, "PARENTAL_RATING 1.1/native: ignoring stale handler for "
+                    + service.getUniqueIdentifier());
+                return;
+            }
+            int contentAge = resolveContentAge(service);
+            boolean blocked = isParentalBlocked(contentAge);
+            Log.d(TAG, "PARENTAL_RATING 1.1/native: service=" + service.getUniqueIdentifier()
+                + ", contentAge=" + contentAge + ", parentalControlAge="
+                + mTvInputCallback.getParentalControlAge() + ", blocked=" + blocked);
+            if (blocked) {
+                mBlocked = true;
+                mTvInputCallback.destroyHbbtvApplication();
+                handleRatingBlocked(channel);
+                requestOverrideIfNeeded();
+                return;
+            }
+            mBlocked = false;
+            mOverrideRequestPending = false;
+            mTvInputCallback.clearParentalAccessOverride();
+            launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1_1), LINKED_APP_SCHEME_1_1);
+            if ("dvb-dash".equals(toInstance.getDeliveryType())) {
+                mTvInputCallback.tuneOffBroadcast();
+                if (mDvbIView.tune(uri, mSubtitlesEnabled) && !PLAYER_STATUS_STARTING.equals(mLastState)) {
+                    mLastState = PLAYER_STATUS_STARTING;
+                    dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(),
+                        channel.getSid(), PLAYER_STATUS_STARTING);
+                }
+            } else {
+                Log.i(TAG, "RF_TUNE_DEBUG: switching to broadcast instance, deliveryType="
+                    + toInstance.getDeliveryType() + ", mLastState=" + mLastState);
+                mDvbIView.tuneOff();
+                mTracks.clear();
+                mSelectedTracks.clear();
+                mIsUnselected.clear();
+                Triplet rfTriplet = toInstance.getTriplet();
+                if (rfTriplet != null) {
+                    Log.i(TAG, "RF_TUNE_DEBUG: calling tuneBroadcast(" + rfTriplet + ")");
+                    boolean tuned = mTvInputCallback.tuneBroadcast(rfTriplet.toString());
+                    if (tuned) {
+                        if (!PLAYER_STATUS_STARTING.equals(mLastState)) {
+                            mLastState = PLAYER_STATUS_STARTING;
+                            dispatchPlayerStatusChangedEvent(
+                                rfTriplet.getOrigNetId(),
+                                rfTriplet.getTsId(),
+                                rfTriplet.getServiceId(),
+                                PLAYER_STATUS_STARTING);
+                        }
+                    } else {
+                        Log.e(TAG, "RF_TUNE_DEBUG: tuneBroadcast failed for " + rfTriplet);
+                        mLastState = PLAYER_STATUS_ERROR;
+                        dispatchPlayerStatusChangedEvent(
+                            rfTriplet.getOrigNetId(),
+                            rfTriplet.getTsId(),
+                            rfTriplet.getServiceId(),
+                            PLAYER_STATUS_ERROR);
+                    }
+                } else {
+                    Log.w(TAG, "RF_TUNE_DEBUG: no RF triplet on broadcast instance, tuneOff only");
+                    mDvbIView.tuneOff();
+                }
+            }
+        }
+
+        private void handleLinkedApp1_2(DvbIChannelAdapter channel, String appUrl, Service service) {
+            if (!isStillTuned(service)) {
+                Log.i(TAG, "PARENTAL_RATING 1.2: ignoring stale handler for "
+                    + service.getUniqueIdentifier());
+                return;
+            }
+            mPendingLinkedAppUrl = appUrl;
+            mPendingLinkedAppScheme = LINKED_APP_SCHEME_1_2;
+            int contentAge = resolveContentAge(service);
+            boolean blocked = isParentalBlocked(contentAge);
+            Log.d(TAG, "PARENTAL_RATING 1.2: contentAge=" + contentAge
+                + ", threshold=" + mTvInputCallback.getParentalControlAge()
+                + ", overridden=" + mTvInputCallback.isParentalAccessOverridden()
+                + ", blocked=" + blocked);
+            // Linked app controlling media: terminal does not start DASH itself.
+            mTvInputCallback.tuneOffBroadcast();
+            mDvbIView.tuneOff();
+            if (blocked) {
+                mBlocked = true;
+                mTvInputCallback.destroyHbbtvApplication();
+                handleRatingBlocked(channel);
+                requestOverrideIfNeeded();
+                return;
+            }
+            mBlocked = false;
+            mOverrideRequestPending = false;
+            mTvInputCallback.clearParentalAccessOverride();
+            launchApp(appUrl, LINKED_APP_SCHEME_1_2);
+            if (!PLAYER_STATUS_STARTING.equals(mLastState)) {
+                mLastState = PLAYER_STATUS_STARTING;
+                dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(),
+                    channel.getSid(), PLAYER_STATUS_STARTING);
+            }
+            mTvInputCallback.notifyVideoAvailable();
+        }
+
+        private void requestOverrideIfNeeded() {
+            if (mOverrideRequestPending) {
+                return;
+            }
+            mOverrideRequestPending = true;
+            mTvInputCallback.requestParentalAccessOverride(approved -> {
+                mOverrideRequestPending = false;
+                if (!approved) {
+                    Log.i(TAG, "Parental override notApproved; remaining blocked");
+                    return;
+                }
+                Log.i(TAG, "Parental override approved; reselecting service instance");
+                mBlocked = false;
+                invalidateErrorTimer();
+                ServiceInstance instance = mServiceManager.getTunedInstance();
+                if (instance != null) {
+                    onInstanceChanged(instance, instance);
+                } else if (mPendingLinkedAppUrl != null) {
+                    launchApp(mPendingLinkedAppUrl, mPendingLinkedAppScheme);
+                    mTvInputCallback.notifyVideoAvailable();
+                }
+            });
+        }
+
+        private boolean isStillTuned(Service service) {
+            Service tuned = mServiceManager.getTunedService();
+            return service != null && tuned != null
+                && service.getUniqueIdentifier().equals(tuned.getUniqueIdentifier());
+        }
+
+        private int resolveContentAge(Service service) {
+            Programme now = mServiceManager.getNowProgramme();
+            if (now != null && now.getMinimumAge() > 0) {
+                return now.getMinimumAge();
+            }
+            if (service != null && service.getParentalRating() != null) {
+                return service.getParentalRating();
+            }
+            return 0;
+        }
+
+        private boolean isParentalBlocked(int contentAge) {
+            if (mTvInputCallback.isParentalAccessOverridden()) {
+                return false;
+            }
+            int threshold = mTvInputCallback.getParentalControlAge();
+            return threshold > 0 && contentAge >= threshold;
         }
 
         private void launchApp(String appUrl, String scheme) {
@@ -716,8 +838,13 @@ public class DvbIClient {
     }
 
     public synchronized boolean tune(String uid, int instanceIndex) {
+        mTuneGeneration++;
         boolean blocked = mBlocked;
         mBlocked = false;
+        mOverrideRequestPending = false;
+        mTvInputCallback.clearParentalAccessOverride();
+        mPendingLinkedAppUrl = null;
+        mPendingLinkedAppScheme = null;
         invalidateErrorTimer();
         mLastState = null;
         if (mServiceManager.tune(mDbHandler.getServiceForUID(uid), instanceIndex)) {
@@ -1087,7 +1214,8 @@ public class DvbIClient {
                         .setLongDescription(programme.getLongDescription())
                         .setStartTimeUtcMillis(programme.getStartTime() * 1000)
                         .setEndTimeUtcMillis(programme.getEndTime() * 1000)
-                        .setContentRatings(createContentRating(programme.getMinimumAge()))
+                        // Age stays in InternalProviderData for HbbTV. Do not publish
+                        // TvContentRating — Live Channels would show its own lock UI.
                         .setInternalProviderData(data)
                         .build());
             }
@@ -1105,16 +1233,6 @@ public class DvbIClient {
         } catch (Exception e) {
         }
         return null;
-    }
-
-    private TvContentRating[] createContentRating(int rating) {
-        TvContentRating[] tvContentRatings = null;
-        if ((rating >= 4) && (rating <= 18)) {
-            tvContentRatings = new TvContentRating[]{
-                    TvContentRating.createRating("com.android.tv", "DVB", "DVB_" + (rating - 3))
-            };
-        }
-        return tvContentRatings;
     }
 
     private DvbChannel createChannel(Service service) throws JSONException {
