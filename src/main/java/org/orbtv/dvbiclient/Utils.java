@@ -3,14 +3,12 @@ package org.orbtv.dvbiclient;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class Utils {
     public static Long getSecondsFromDate(String dateString) {
         if (dateString != null) {
             try {
-                Instant instant = Instant.parse(dateString);
+                Instant instant = Instant.parse(dateString.trim());
                 return instant.getEpochSecond();
             } catch (DateTimeParseException e) {
                 e.printStackTrace();
@@ -35,17 +33,14 @@ public class Utils {
     }
 
     public static Duration getDurationFromString(String duration) {
-        if (duration != null) {
-            Pattern pattern = Pattern.compile("PT(?:(\\d+)H)?(?:(\\d+)M)?");
-            Matcher matcher = pattern.matcher(duration);
-
-            if (matcher.matches()) {
-                int hours = matcher.group(1) != null ? Integer.parseInt(matcher.group(1)) : 0;
-                int minutes = matcher.group(2) != null ? Integer.parseInt(matcher.group(2)) : 0;
-
-                return Duration.ofHours(hours).plusMinutes(minutes);
-            }
+        if (duration == null) {
+            return null;
         }
-        return null;
+        try {
+            return Duration.parse(duration.trim());
+        } catch (DateTimeParseException e) {
+            e.printStackTrace();
+            return null;
+        }
     }
 }

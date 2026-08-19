@@ -9,6 +9,7 @@ import org.orbtv.dvbiclient.model.ServiceInstance;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 public class TunedServiceManager {
     private static final String TAG = TunedServiceManager.class.getSimpleName();
@@ -57,7 +58,10 @@ public class TunedServiceManager {
         synchronized (mLock) {
             mTunedService = service;
             updateNowNextProgrammes();
+            Log.i(TAG, "Tune now/next size=" + mNowNextProgrammes.size()
+                    + ", now=" + getNowProgramme());
             mTunedInstance = instance;
+            notifyNowProgrammeUpdated(getNowProgramme());
             for (Callback callback : mCallbacks) {
                 callback.onInstanceChanged(null, mTunedInstance);
             }
@@ -134,25 +138,66 @@ public class TunedServiceManager {
         }
     }
     
+    /** Reload now/next from the DB. Does not notify; the poller reports now-programme changes. */
     private void updateNowNextProgrammes() {
+        if (mTunedService == null) {
+            return;
+        }
+        List<Programme> programmes = fetchNowNextProgrammes(mTunedService.getUniqueIdentifier());
+        applyNowNextProgrammes(programmes);
+    }
+
+    private List<Programme> fetchNowNextProgrammes(String serviceUid) {
         long currentTime = System.currentTimeMillis() / 1000;
-        List<Programme> programmes = mDbHandler.getProgrammesForService(
-                mTunedService.getUniqueIdentifier(),
-                currentTime, currentTime + SECONDS_OF_DAY, 2);
-        if (!programmes.equals(mNowNextProgrammes)) {
+        return mDbHandler.getProgrammesForService(
+                serviceUid, currentTime, currentTime + SECONDS_OF_DAY, 5);
+    }
+
+    private void applyNowNextProgrammes(List<Programme> programmes) {
+        if (programmes != null && !programmes.equals(mNowNextProgrammes)) {
             mNowNextProgrammes = programmes;
-            for (Callback callback : mCallbacks) {
-                callback.onNowProgrammeUpdated(getNowProgramme());
-            }
+            Log.i(TAG, "Now/next list size=" + programmes.size()
+                    + ", now=" + getNowProgramme());
+        }
+    }
+
+    private static boolean isSameNowProgramme(Programme a, Programme b) {
+        if (a == b) {
+            return true;
+        }
+        if (a == null || b == null) {
+            return false;
+        }
+        return Objects.equals(a.getProgramId(), b.getProgramId())
+                && a.getStartTime() == b.getStartTime()
+                && a.getMinimumAge() == b.getMinimumAge();
+    }
+
+    private void notifyNowProgrammeUpdated(Programme programme) {
+        for (Callback callback : mCallbacks) {
+            callback.onNowProgrammeUpdated(programme);
         }
     }
 
     private void stopTunedServiceThread() {
+        Thread thread;
+        TunedServiceRunnable runnable;
         synchronized (mLock) {
-            if (mTunedServiceRunnable != null) {
-                mTunedServiceRunnable.stop();
-                mTunedServiceThread = null;
-                mTunedServiceRunnable = null;
+            runnable = mTunedServiceRunnable;
+            thread = mTunedServiceThread;
+            mTunedServiceRunnable = null;
+            mTunedServiceThread = null;
+            if (runnable != null) {
+                runnable.stop();
+            }
+        }
+        if (thread != null) {
+            thread.interrupt();
+            try {
+                thread.join(3000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                Log.w(TAG, "Interrupted while waiting for tune poller to stop");
             }
         }
     }
@@ -207,7 +252,7 @@ public class TunedServiceManager {
     }
 
     private class TunedServiceRunnable implements Runnable {
-        private volatile boolean mIsRunning = false;
+        private volatile boolean mIsRunning = true;
         private ServiceInstance mTargetInstance;
 
         public TunedServiceRunnable(boolean forceTunedInstance) {
@@ -220,7 +265,6 @@ public class TunedServiceManager {
 
         public void stop() {
             mIsRunning = false;
-            Thread.currentThread().interrupt();
             Log.i(TAG, "Stopping TunedServiceRunnable...");
         }
 
@@ -228,24 +272,24 @@ public class TunedServiceManager {
         public void run() {
             ServiceInstance tunedInstance = null;
             Programme nowProgramme = getNowProgramme();
-            mIsRunning = true;
             while (mIsRunning) {
+                String uid;
                 synchronized (mLock) {
+                    uid = mTunedService != null ? mTunedService.getUniqueIdentifier() : null;
+                }
+                List<Programme> refreshed = uid != null ? fetchNowNextProgrammes(uid) : null;
+
+                synchronized (mLock) {
+                    if (!mIsRunning || mTunedServiceRunnable != this
+                            || uid == null || mTunedService == null
+                            || !uid.equals(mTunedService.getUniqueIdentifier())) {
+                        break;
+                    }
+                    applyNowNextProgrammes(refreshed);
                     Programme programme = getNowProgramme();
-                    if (nowProgramme != programme) {
-                        if (nowProgramme == null) {
-                            nowProgramme = programme;
-                            // no need to call updateNowNextProgrammes() as it will return the same
-                            // now and next programmes and the callback will not be called
-                            for (Callback callback : mCallbacks) {
-                                callback.onNowProgrammeUpdated(programme);
-                            }
-                        }
-                        else {
-                            // first update, then get a reference to the now Programme
-                            updateNowNextProgrammes();
-                            nowProgramme = getNowProgramme();
-                        }
+                    if (!isSameNowProgramme(nowProgramme, programme)) {
+                        nowProgramme = programme;
+                        notifyNowProgrammeUpdated(programme);
                     }
 
                     tunedInstance = mTunedInstance;
@@ -274,7 +318,6 @@ public class TunedServiceManager {
                 try {
                     Thread.sleep(1000);
                 } catch (InterruptedException e) {
-                    e.printStackTrace();
                     stop();
                 }
             }
