@@ -290,37 +290,31 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                 Programme.DB_COLUMN_LONG_DESCRIPTION, Programme.DB_COLUMN_PARENTAL_RATING, Programme.DB_COLUMN_START_TIME,
                 Programme.DB_COLUMN_END_TIME, Programme.DB_COLUMN_PROGRAM_ID, Programme.DB_COLUMN_MINIMUM_AGE,
                 Programme.DB_COLUMN_PARENTAL_RATING_DESC, Programme.DB_COLUMN_ON_DEMAND_URL };
-        String start = String.valueOf(startTime);
-        String end = String.valueOf(endTime);
-        String[] selectionArgs = { serviceUID, start, start, end, end, start, end, limit.toString() };
         Cursor cursor = null;
         try
         {
+            // Interval overlap: programme [start,end) overlaps query [startTime,endTime].
             cursor = db.query(PROGRAMMES_TABLE, projection,
-                    COLUMN_FOREIGN_KEY + "= ? AND (((" +
-                            Programme.DB_COLUMN_START_TIME + " >= ? OR " + Programme.DB_COLUMN_END_TIME + " >= ?) AND (" +
-                            Programme.DB_COLUMN_START_TIME + " <= ? OR " + Programme.DB_COLUMN_END_TIME + " <= ?)) OR (" +
-                            Programme.DB_COLUMN_START_TIME + " <= ? AND " + Programme.DB_COLUMN_END_TIME + " >= ?)) ORDER BY " +
-                            Programme.DB_COLUMN_START_TIME + " LIMIT ?",
-                    selectionArgs, null, null, null);
+                    COLUMN_FOREIGN_KEY + "=? AND " +
+                            Programme.DB_COLUMN_START_TIME + "<? AND " +
+                            Programme.DB_COLUMN_END_TIME + ">?",
+                    new String[] { serviceUID, String.valueOf(endTime), String.valueOf(startTime) },
+                    null, null,
+                    Programme.DB_COLUMN_START_TIME + " ASC",
+                    limit != null ? String.valueOf(limit) : null);
             if (cursor != null) {
-                Programme.Builder builder = new Programme.Builder();
                 while (cursor.moveToNext()) {
-                    programmes.add(builder
-                            .setTitle(cursor.getString(0))
-                            .setShortDescription(cursor.getString(1))
-                            .setMediumDescription(cursor.getString(2))
-                            .setLongDescription(cursor.getString(3))
-                            .setParentalRatingScheme(cursor.getString(4))
-                            .setStartTime(cursor.getLong(5))
-                            .setEndTime(cursor.getLong(6))
-                            .setProgramId(cursor.getString(7))
-                            .setMinimumAge(cursor.getInt(8))
-                            .setParentalRatingDescription(cursor.getString(9))
-                            .setOnDemandURL(cursor.getString(10))
-                            .build());
+                    programmes.add(programmeFromCursor(cursor));
                 }
             }
+            if (programmes.isEmpty()) {
+                Log.i(TAG, "No programmes in window for " + serviceUID
+                        + " [" + startTime + "," + endTime + "]; stored="
+                        + countProgrammesForService(db, serviceUID));
+            }
+        }
+        catch (Exception e) {
+            Log.e(TAG, "getProgrammesForService failed for " + serviceUID, e);
         }
         finally
         {
@@ -330,6 +324,38 @@ public class DatabaseHandler extends SQLiteOpenHelper {
             }
         }
         return programmes;
+    }
+
+    private int countProgrammesForService(SQLiteDatabase db, String serviceUID) {
+        Cursor cursor = null;
+        try {
+            cursor = db.rawQuery("SELECT COUNT(*) FROM " + PROGRAMMES_TABLE
+                    + " WHERE " + COLUMN_FOREIGN_KEY + "=?", new String[] { serviceUID });
+            if (cursor != null && cursor.moveToFirst()) {
+                return cursor.getInt(0);
+            }
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
+        return 0;
+    }
+
+    private static Programme programmeFromCursor(Cursor cursor) {
+        return new Programme.Builder()
+                .setTitle(cursor.getString(0))
+                .setShortDescription(cursor.getString(1))
+                .setMediumDescription(cursor.getString(2))
+                .setLongDescription(cursor.getString(3))
+                .setParentalRatingScheme(cursor.getString(4))
+                .setStartTime(cursor.getLong(5))
+                .setEndTime(cursor.getLong(6))
+                .setProgramId(cursor.getString(7))
+                .setMinimumAge(cursor.getInt(8))
+                .setParentalRatingDescription(cursor.getString(9))
+                .setOnDemandURL(cursor.getString(10))
+                .build();
     }
 
     private List<Service> getServices(SQLiteDatabase db, String listUID) {

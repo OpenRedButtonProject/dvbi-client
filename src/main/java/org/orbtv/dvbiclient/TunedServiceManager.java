@@ -149,8 +149,10 @@ public class TunedServiceManager {
 
     private List<Programme> fetchNowNextProgrammes(String serviceUid) {
         long currentTime = System.currentTimeMillis() / 1000;
-        return mDbHandler.getProgrammesForService(
+        List<Programme> programmes = mDbHandler.getProgrammesForService(
                 serviceUid, currentTime, currentTime + SECONDS_OF_DAY, 5);
+        Log.i(TAG, "Fetched " + programmes.size() + " programmes for " + serviceUid);
+        return programmes;
     }
 
     private void applyNowNextProgrammes(List<Programme> programmes) {
@@ -280,37 +282,38 @@ public class TunedServiceManager {
                 List<Programme> refreshed = uid != null ? fetchNowNextProgrammes(uid) : null;
 
                 synchronized (mLock) {
-                    if (!mIsRunning || mTunedServiceRunnable != this
-                            || uid == null || mTunedService == null
-                            || !uid.equals(mTunedService.getUniqueIdentifier())) {
+                    if (!mIsRunning || mTunedServiceRunnable != this) {
                         break;
                     }
-                    applyNowNextProgrammes(refreshed);
-                    Programme programme = getNowProgramme();
-                    if (!isSameNowProgramme(nowProgramme, programme)) {
-                        nowProgramme = programme;
-                        notifyNowProgrammeUpdated(programme);
-                    }
+                    if (uid != null && mTunedService != null
+                            && uid.equals(mTunedService.getUniqueIdentifier())) {
+                        applyNowNextProgrammes(refreshed);
+                        Programme programme = getNowProgramme();
+                        if (!isSameNowProgramme(nowProgramme, programme)) {
+                            nowProgramme = programme;
+                            notifyNowProgrammeUpdated(programme);
+                        }
 
-                    tunedInstance = mTunedInstance;
-                    if (mTargetInstance == null && mTunedService != null) {
-                        ServiceInstance priorityInstance = getMaxPriorityInstance(mTunedService);
-                        if (priorityInstance != tunedInstance) {
-                            mTunedInstance = priorityInstance;
-                            for (Callback callback : mCallbacks) {
-                                callback.onInstanceChanged(tunedInstance, priorityInstance);
+                        tunedInstance = mTunedInstance;
+                        if (mTargetInstance == null && mTunedService != null) {
+                            ServiceInstance priorityInstance = getMaxPriorityInstance(mTunedService);
+                            if (priorityInstance != tunedInstance) {
+                                mTunedInstance = priorityInstance;
+                                for (Callback callback : mCallbacks) {
+                                    callback.onInstanceChanged(tunedInstance, priorityInstance);
+                                }
                             }
                         }
-                    }
-                    else if ((tunedInstance == null) == isInstanceAvailable(mTargetInstance)){
-                        if (tunedInstance != null) {
-                            mTunedInstance = null;
-                        }
-                        else {
-                            mTunedInstance = mTargetInstance;
-                        }
-                        for (Callback callback : mCallbacks) {
-                            callback.onInstanceChanged(tunedInstance, mTunedInstance);
+                        else if ((tunedInstance == null) == isInstanceAvailable(mTargetInstance)){
+                            if (tunedInstance != null) {
+                                mTunedInstance = null;
+                            }
+                            else {
+                                mTunedInstance = mTargetInstance;
+                            }
+                            for (Callback callback : mCallbacks) {
+                                callback.onInstanceChanged(tunedInstance, mTunedInstance);
+                            }
                         }
                     }
                 }
