@@ -35,7 +35,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Timer;
-import java.util.TimerTask;
 
 public class DvbIClient {
     private static DvbIClient mSingleton;
@@ -175,8 +174,11 @@ public class DvbIClient {
             int contentAge = 0;
             if (programme != null && programme.getMinimumAge() > 0) {
                 contentAge = programme.getMinimumAge();
-            } else if (service.getParentalRating() != null) {
-                contentAge = service.getParentalRating();
+            } else {
+                Service rated = tunedServiceFromDb();
+                if (rated != null && rated.getParentalRating() != null) {
+                    contentAge = rated.getParentalRating();
+                }
             }
             int threshold = mTvInputCallback.getParentalControlAge();
             // Block at-or-above threshold (age 18 content blocked when threshold is 18).
@@ -215,8 +217,9 @@ public class DvbIClient {
         }
 
         /**
-         * Native DASH / RF, with optional 1.1 media-in-parallel. Same PIN/destroy policy as 1.2:
-         * do not start the app or media while blocked; wait for HbbTV PIN overlay.
+         * Native DASH / RF, with optional 1.1 media-in-parallel (ERRATA0300–0320).
+         * Stop media and prompt PIN while blocked; do not kill a running 1.1 app.
+         * Launch this service's 1.1 only once presentation is allowed.
          */
         private void handleNativeOrLinkedApp1_1(DvbIChannelAdapter channel,
                 ServiceInstance toInstance, Service service, String uri) {
@@ -232,14 +235,14 @@ public class DvbIClient {
                 + mTvInputCallback.getParentalControlAge() + ", blocked=" + blocked);
             if (blocked) {
                 mBlocked = true;
-                mTvInputCallback.destroyHbbtvApplication();
                 handleRatingBlocked(channel);
                 requestOverrideIfNeeded();
                 return;
             }
             mBlocked = false;
             mOverrideRequestPending = false;
-            mTvInputCallback.clearParentalAccessOverride();
+            // Do not clear a PIN override here: this service may still be over-threshold.
+            // Override is cleared on channel change (tune) or when the rating drops.
             launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1_1), LINKED_APP_SCHEME_1_1);
             if ("dvb-dash".equals(toInstance.getDeliveryType())) {
                 mTvInputCallback.tuneOffBroadcast();
@@ -310,7 +313,8 @@ public class DvbIClient {
             }
             mBlocked = false;
             mOverrideRequestPending = false;
-            mTvInputCallback.clearParentalAccessOverride();
+            // Do not clear a PIN override here: this service may still be over-threshold.
+            // Override is cleared on channel change (tune) or when the rating drops.
             launchApp(appUrl, LINKED_APP_SCHEME_1_2);
             if (!PLAYER_STATUS_STARTING.equals(mLastState)) {
                 mLastState = PLAYER_STATUS_STARTING;
@@ -331,7 +335,7 @@ public class DvbIClient {
                     Log.i(TAG, "Parental override notApproved; remaining blocked");
                     return;
                 }
-                Log.i(TAG, "Parental override approved; reselecting service instance");
+                Log.i(TAG, "Parental override approved; retrying presentation");
                 mBlocked = false;
                 invalidateErrorTimer();
                 ServiceInstance instance = mServiceManager.getTunedInstance();
@@ -355,13 +359,17 @@ public class DvbIClient {
             if (now != null && now.getMinimumAge() > 0) {
                 return now.getMinimumAge();
             }
-            if (service != null && service.getParentalRating() != null) {
-                return service.getParentalRating();
+            Service rated = tunedServiceFromDb();
+            if (rated == null) {
+                rated = service;
+            }
+            if (rated != null && rated.getParentalRating() != null) {
+                return rated.getParentalRating();
             }
             return 0;
         }
 
-        private boolean isParentalBlocked(int contentAge) {
+    private boolean isParentalBlocked(int contentAge) {
             if (mTvInputCallback.isParentalAccessOverridden()) {
                 return false;
             }
@@ -376,75 +384,25 @@ public class DvbIClient {
             }
         }
 
+        /**
+         * Keep video/broadcast in connecting (STARTING) without presenting DASH.
+         * Do not schedule a permanent-error timeout: §10.2.6.1 allows staying in connecting
+         * until PIN, rating drop, or the user leaves the channel (ERRATA0320).
+         */
         private void handleRatingBlocked(DvbIChannelAdapter channel) {
-            if (channel != null) {
-                // Check if channel change is in progress (in a transitional state, not a final state)
-                // Final states are: PLAYING, BLOCKED, ERROR, BAD_CONNECTION
-                // If we're not in a final state, we're in a transitional state and should complete the change first
-                boolean isFinalState = PLAYER_STATUS_PLAYING.equals(mLastState) ||
-                    PLAYER_STATUS_BLOCKED.equals(mLastState) ||
-                    PLAYER_STATUS_ERROR.equals(mLastState) ||
-                    PLAYER_STATUS_BAD_CONNECTION.equals(mLastState);
-                boolean channelChangeInProgress = !isFinalState;
-
-                if (channelChangeInProgress) {
-                    // Complete the channel change to SUCCEEDED state first, but stop playback immediately
-                    // to prevent entering PRESENTING state
-                    Log.i(TAG, "CHANNEL_STATUS: Channel change in progress when parental rating blocked (mLastState=" + mLastState +
-                        "). Calling tuneOff() to stop playback immediately.");
-                    mDvbIView.tuneOff();
-                    mTracks.clear();
-                    mSelectedTracks.clear();
-                    mIsUnselected.clear();
-                    mTvInputCallback.tuneOffBroadcast();
-
-                    // Send BLOCKED status FIRST to prevent player from entering PRESENTING
-                    // This must come before STARTING to ensure the player is blocked before it can start
-                    Log.i(TAG, "CHANNEL_STATUS: Sending BLOCKED status FIRST (before STARTING)");
-                    mLastState = PLAYER_STATUS_BLOCKED;
-                    dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_BLOCKED);
-
-                    // Then send STARTING status (maps to CONNECTING, not PRESENTING) to complete the channel change
-                    // We use STARTING instead of PLAYING to avoid PRESENTING state
-                    // STARTING (129) -> CHANNEL_STATUS_CONNECTING (-2) allows ChannelChangeSucceeded but prevents PRESENTING
-                    Log.i(TAG, "CHANNEL_STATUS: Sending STARTING status AFTER BLOCKED - maps to CONNECTING, not PRESENTING");
-                    mLastState = PLAYER_STATUS_STARTING;
-                    dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
-
-                    // Update state back to BLOCKED and set up error timer
-                    Log.i(TAG, "CHANNEL_STATUS: Setting mLastState back to BLOCKED");
-                    mLastState = PLAYER_STATUS_BLOCKED;
-                    invalidateErrorTimer();
-                    mPermanentErrorTimer = new Timer();
-                    mPermanentErrorTimer.schedule(new TimerTask() {
-                        @Override
-                        public void run() {
-                            Log.i(TAG, "Triggering permanent error state...");
-                            mLastState = PLAYER_STATUS_BLOCKED;
-                            dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_ERROR);
-                        }
-                    }, 30000);
-                } else {
-                    // Channel change not in progress, block immediately
-                    mDvbIView.tuneOff();
-                    mTracks.clear();
-                    mSelectedTracks.clear();
-                    mIsUnselected.clear();
-                    mLastState = PLAYER_STATUS_STARTING;
-                    dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_BLOCKED);
-                    invalidateErrorTimer();
-                    mPermanentErrorTimer = new Timer();
-                    mPermanentErrorTimer.schedule(new TimerTask() {
-                        @Override
-                        public void run() {
-                            Log.i(TAG, "Triggering permanent error state...");
-                            mLastState = PLAYER_STATUS_BLOCKED;
-                            dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_ERROR);
-                        }
-                    }, 30000);
-                    mTvInputCallback.tuneOffBroadcast();
-                }
+            if (channel == null) {
+                return;
             }
+            Log.i(TAG, "CHANNEL_STATUS: parental block — stopping media, staying CONNECTING");
+            mDvbIView.tuneOff();
+            mTracks.clear();
+            mSelectedTracks.clear();
+            mIsUnselected.clear();
+            mTvInputCallback.tuneOffBroadcast();
+            invalidateErrorTimer();
+            mLastState = PLAYER_STATUS_STARTING;
+            dispatchPlayerStatusChangedEvent(
+                channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
         }
     };
 
@@ -652,6 +610,10 @@ public class DvbIClient {
             Log.i(TAG, "handleChannelStatusChange; onid=" + onid + ", tsid=" + tsid + ", sid=" + sid
                 + ", event=" + eventName + ", mLastState=" + mLastState
                 + ", tunedInstance=" + (tunedInstance != null ? tunedInstance.getDeliveryType() + ":" + tunedInstance.getTriplet() : "null"));
+            if (PLAYER_STATUS_PLAYING.equals(eventName) && mBlocked) {
+                Log.w(TAG, "Ignoring PLAYING while parental blocked");
+                return;
+            }
             dispatchPlayerStatusChangedEvent(onid, tsid, sid, eventName);
             switch (eventName) {
                 case PLAYER_STATUS_PLAYING:
@@ -835,6 +797,16 @@ public class DvbIClient {
         if (mServiceManager.getTunedService() != null) {
             mServiceManagerCallback.onNowProgrammeUpdated(mServiceManager.getNowProgramme());
         }
+    }
+
+    /** Latest service-list row for the tuned service (ratings may have changed). */
+    private Service tunedServiceFromDb() {
+        Service s = mServiceManager.getTunedService();
+        if (s == null) {
+            return null;
+        }
+        Service fresh = mDbHandler.getServiceForUID(s.getUniqueIdentifier());
+        return fresh != null ? fresh : s;
     }
 
     public synchronized boolean tune(String uid, int instanceIndex) {
@@ -1393,6 +1365,8 @@ public class DvbIClient {
             for (DvbCallback handler : mDvbCallbacks) {
                 handler.onServiceAdded();
             }
+            // Service-list ParentalRating may have changed (ERRATA0310).
+            onParentalControlAgeChanged();
 
             //TOREMOVE
 //            String serviceUniqueIdentifier = "tag:sofiadigital.com,2023:org.hbbtv_DVBI_VBO0200-1";
