@@ -256,6 +256,8 @@ public class TunedServiceManager {
     private class TunedServiceRunnable implements Runnable {
         private volatile boolean mIsRunning = true;
         private ServiceInstance mTargetInstance;
+        /** Last reported availability for the app-pinned instance; start true (we are presenting). */
+        private boolean mLastPinnedAvailable = true;
 
         public TunedServiceRunnable(boolean forceTunedInstance) {
             if (forceTunedInstance) {
@@ -295,7 +297,7 @@ public class TunedServiceManager {
                         }
 
                         tunedInstance = mTunedInstance;
-                        if (mTargetInstance == null && mTunedService != null) {
+                        if (mTargetInstance == null) {
                             ServiceInstance priorityInstance = getMaxPriorityInstance(mTunedService);
                             if (priorityInstance != tunedInstance) {
                                 mTunedInstance = priorityInstance;
@@ -303,16 +305,20 @@ public class TunedServiceManager {
                                     callback.onInstanceChanged(tunedInstance, priorityInstance);
                                 }
                             }
-                        }
-                        else if ((tunedInstance == null) == isInstanceAvailable(mTargetInstance)){
-                            if (tunedInstance != null) {
-                                mTunedInstance = null;
-                            }
-                            else {
-                                mTunedInstance = mTargetInstance;
-                            }
-                            for (Callback callback : mCallbacks) {
-                                callback.onInstanceChanged(tunedInstance, mTunedInstance);
+                        } else {
+                            // O.5.4 / ERRATA0400 — keep the app-pinned instance even if it has
+                            // left its availability window. Do not fall through to RF and do
+                            // not clear the instance (that would launch the scheme-2
+                            // "outside of availability window" app). Stop presentation instead.
+                            boolean available = isInstanceAvailable(mTargetInstance);
+                            if (available != mLastPinnedAvailable) {
+                                mLastPinnedAvailable = available;
+                                Log.i(TAG, "App-pinned instance availability changed: available="
+                                        + available + " (instance kept selected)");
+                                ServiceInstance pinned = mTargetInstance;
+                                for (Callback callback : mCallbacks) {
+                                    callback.onPinnedInstanceAvailabilityChanged(pinned, available);
+                                }
                             }
                         }
                     }
@@ -331,5 +337,10 @@ public class TunedServiceManager {
     public interface Callback {
         void onInstanceChanged(ServiceInstance fromInstance, ServiceInstance toInstance);
         void onNowProgrammeUpdated(Programme programme);
+        /**
+         * App-pinned instance (HbbTV O.5.4) entered or left its Availability Period.
+         * The selected instance is unchanged; the client must stop or resume presentation.
+         */
+        void onPinnedInstanceAvailabilityChanged(ServiceInstance instance, boolean available);
     }
 }

@@ -102,6 +102,8 @@ public class DvbIClient {
     private boolean mOverrideRequestPending = false;
     private String mPendingLinkedAppUrl;
     private String mPendingLinkedAppScheme;
+    /** App-pinned instance is outside its Availability Period; ignore DASH PLAYING until it returns. */
+    private volatile boolean mPinnedInstanceOutsideWindow = false;
     private final TunedServiceManager.Callback mServiceManagerCallback = new TunedServiceManager.Callback() {
         @Override
         public void onInstanceChanged(ServiceInstance fromInstance, ServiceInstance toInstance) {
@@ -135,6 +137,11 @@ public class DvbIClient {
                         }
                     });
                 } else {
+                    // Unpinned path only: no instance is available, so the service is inactive.
+                    // App-pinned instances (HbbTV O.5.4 / ERRATA0400) are kept selected by
+                    // TunedServiceManager even when outside their availability window, so this
+                    // branch must not run in that case (would launch the service-level
+                    // "outside of availability window" app and drop the running 1.1 app).
                     Log.i(TAG, "No service instance is currently available.");
                     mTvInputCallback.tuneOffBroadcast();
                     mDvbIView.tuneOff();
@@ -159,6 +166,51 @@ public class DvbIClient {
                             mDvbIView.loadUrl(channel.getLinkedAppUri(LINKED_APP_SCHEME_1000_1));
                         });
                     }
+                }
+            }
+        }
+
+        @Override
+        public void onPinnedInstanceAvailabilityChanged(ServiceInstance instance, boolean available) {
+            Service service = mServiceManager.getTunedService();
+            if (service == null || instance == null) {
+                Log.e(TAG, "onPinnedInstanceAvailabilityChanged; No tuned service/instance");
+                return;
+            }
+            DvbIChannelAdapter channel = new DvbIChannelAdapter.Builder()
+                    .setService(service)
+                    .setServiceInstance(instance)
+                    .build();
+            if (!available) {
+                Log.i(TAG, "PINNED_AVAIL: instance left availability window; stopping presentation, "
+                        + "staying on instance (O.5.4 / ERRATA0400)");
+                mPinnedInstanceOutsideWindow = true;
+                mDvbIView.tuneOff();
+                mTracks.clear();
+                mSelectedTracks.clear();
+                mIsUnselected.clear();
+                mTvInputCallback.tuneOffBroadcast();
+                invalidateErrorTimer();
+                mLastState = PLAYER_STATUS_STARTING;
+                dispatchPlayerStatusChangedEvent(
+                        channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
+                return;
+            }
+            if (!mPinnedInstanceOutsideWindow) {
+                return;
+            }
+            Log.i(TAG, "PINNED_AVAIL: instance re-entered availability window; resuming presentation");
+            mPinnedInstanceOutsideWindow = false;
+            if (mBlocked) {
+                return;
+            }
+            String uri = instance.getUri();
+            if ("dvb-dash".equals(instance.getDeliveryType()) && uri != null) {
+                mTvInputCallback.tuneOffBroadcast();
+                if (mDvbIView.tune(uri, mSubtitlesEnabled)) {
+                    mLastState = PLAYER_STATUS_STARTING;
+                    dispatchPlayerStatusChangedEvent(
+                            channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
                 }
             }
         }
@@ -614,6 +666,10 @@ public class DvbIClient {
                 Log.w(TAG, "Ignoring PLAYING while parental blocked");
                 return;
             }
+            if (PLAYER_STATUS_PLAYING.equals(eventName) && mPinnedInstanceOutsideWindow) {
+                Log.w(TAG, "Ignoring PLAYING while pinned instance is outside availability window");
+                return;
+            }
             dispatchPlayerStatusChangedEvent(onid, tsid, sid, eventName);
             switch (eventName) {
                 case PLAYER_STATUS_PLAYING:
@@ -809,21 +865,42 @@ public class DvbIClient {
         return fresh != null ? fresh : s;
     }
 
+    /**
+     * setChannel onto the already-selected DVB-I instance (O.5.4) must not drop DASH tracks.
+     * Clearing them makes getComponents empty and the 1.1 v/b object never leaves CONNECTING.
+     */
+    private boolean shouldRetainTracks(String uid, int instanceIndex) {
+        Service current = mServiceManager.getTunedService();
+        ServiceInstance currentInst = mServiceManager.getTunedInstance();
+        if (current == null || currentInst == null || uid == null
+                || !uid.equals(current.getUniqueIdentifier())) {
+            return false;
+        }
+        if (instanceIndex < 0) {
+            return true;
+        }
+        return instanceIndex == current.getInstances().indexOf(currentInst);
+    }
+
     public synchronized boolean tune(String uid, int instanceIndex) {
         mTuneGeneration++;
         boolean blocked = mBlocked;
         mBlocked = false;
+        mPinnedInstanceOutsideWindow = false;
         mOverrideRequestPending = false;
         mTvInputCallback.clearParentalAccessOverride();
         mPendingLinkedAppUrl = null;
         mPendingLinkedAppScheme = null;
         invalidateErrorTimer();
         mLastState = null;
+        boolean retainTracks = shouldRetainTracks(uid, instanceIndex);
         if (mServiceManager.tune(mDbHandler.getServiceForUID(uid), instanceIndex)) {
-            mTracks.clear();
-            mStreamEventsLookup.clear();
-            mSelectedTracks.clear();
-            mIsUnselected.clear();
+            if (!retainTracks) {
+                mTracks.clear();
+                mStreamEventsLookup.clear();
+                mSelectedTracks.clear();
+                mIsUnselected.clear();
+            }
             return true;
         }
         mBlocked = blocked;
@@ -833,6 +910,7 @@ public class DvbIClient {
 
     public synchronized void tuneOff() {
         mLastState = null;
+        mPinnedInstanceOutsideWindow = false;
         mServiceManager.tuneOff();
         mStreamEventsLookup.clear();
         mTracks.clear();
