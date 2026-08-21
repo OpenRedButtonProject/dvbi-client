@@ -9,8 +9,10 @@ import org.orbtv.dvbiclient.model.Service;
 import org.orbtv.dvbiclient.model.ServiceInstance;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 public class TunedServiceManager {
     private static final String TAG = TunedServiceManager.class.getSimpleName();
@@ -22,6 +24,7 @@ public class TunedServiceManager {
     private ServiceInstance mTunedInstance = null;
     private DatabaseHandler mDbHandler;
     private List<Programme> mNowNextProgrammes = new ArrayList<>();
+    private final Set<ServiceInstance> mDiscardedInstances = new HashSet<>();
     private final Object mLock = new Object();
 
     public TunedServiceManager(EpgManager epgManager, DatabaseHandler dbHandler) {
@@ -77,6 +80,7 @@ public class TunedServiceManager {
             mTunedService = null;
             mNowNextProgrammes.clear();
             mTunedInstance = null;
+            mDiscardedInstances.clear();
         }
     }
 
@@ -121,6 +125,40 @@ public class TunedServiceManager {
     }
 
     public synchronized ServiceInstance getTunedInstance() { return mTunedInstance; }
+
+    /**
+     * HbbTV O.3 / TS 103 770 §5.2.13: LA 1.2 could not be started, so this instance is discarded
+     * for the current selection attempt and the next selectable instance is chosen.
+     * No-op if the application has pinned an instance (O.5.4 / ERRATA0400).
+     *
+     * @return true if a discard/reselect was performed
+     */
+    public boolean discardCurrentInstanceAndReselect() {
+        ServiceInstance from;
+        ServiceInstance next;
+        synchronized (mLock) {
+            if (mTunedService == null || mTunedInstance == null) {
+                return false;
+            }
+            if (mTunedServiceRunnable != null && mTunedServiceRunnable.mTargetInstance != null) {
+                Log.i(TAG, "LA12_FAIL: not discarding app-pinned instance");
+                return false;
+            }
+            from = mTunedInstance;
+            mDiscardedInstances.add(from);
+            next = getMaxPriorityInstance(mTunedService);
+            Log.i(TAG, "LA12_FAIL: discarded instance, next="
+                    + (next == null ? "none" : next.getDeliveryType()));
+            if (next == from) {
+                return false;
+            }
+            mTunedInstance = next;
+            for (Callback callback : mCallbacks) {
+                callback.onInstanceChanged(from, next);
+            }
+        }
+        return true;
+    }
 
     public synchronized DvbIChannelAdapter getTunedChannel() {
         return new DvbIChannelAdapter.Builder()
@@ -231,6 +269,9 @@ public class TunedServiceManager {
      * linked apps (ERRATA0510) are not a reason to keep the instance selected.
      */
     private boolean isInstanceSelectable(ServiceInstance instance) {
+        if (instance == null || mDiscardedInstances.contains(instance)) {
+            return false;
+        }
         if (!isInstanceAvailable(instance)) {
             return false;
         }

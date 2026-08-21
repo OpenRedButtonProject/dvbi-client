@@ -855,6 +855,36 @@ public class DvbIClient {
         }
     }
 
+    /**
+     * Linked application type 1.2 could not be started (XML AIT or first page). Discard this
+     * service instance and select the next (HbbTV O.3 / ERRATA0600–0630).
+     */
+    public void onLinkedApp12StartFailed(String reason) {
+        ServiceInstance current = mServiceManager.getTunedInstance();
+        Service service = mServiceManager.getTunedService();
+        if (current == null || service == null) {
+            Log.w(TAG, "LA12_FAIL: no tuned instance (" + reason + ")");
+            return;
+        }
+        DvbIChannelAdapter channel = new DvbIChannelAdapter.Builder()
+                .setService(service)
+                .setServiceInstance(current)
+                .build();
+        if (channel == null || channel.getLinkedAppUri(LINKED_APP_SCHEME_1_2) == null) {
+            Log.i(TAG, "LA12_FAIL: current instance is not LA 1.2; ignoring (" + reason + ")");
+            return;
+        }
+        Log.i(TAG, "LA12_FAIL: cannot start (" + reason + "); discarding instance");
+        mPendingLinkedAppUrl = null;
+        mPendingLinkedAppScheme = null;
+        mTvInputCallback.destroyHbbtvApplication();
+        mDvbIView.tuneOff();
+        mTvInputCallback.tuneOffBroadcast();
+        if (!mServiceManager.discardCurrentInstanceAndReselect()) {
+            Log.w(TAG, "LA12_FAIL: discard/reselect did not change instance");
+        }
+    }
+
     /** Latest service-list row for the tuned service (ratings may have changed). */
     private Service tunedServiceFromDb() {
         Service s = mServiceManager.getTunedService();
@@ -1458,6 +1488,8 @@ public class DvbIClient {
                 URL url = new URL(uri);
                 HttpURLConnection connection = (HttpURLConnection) url.openConnection();
                 connection.setRequestMethod("GET");
+                connection.setConnectTimeout(10000);
+                connection.setReadTimeout(10000);
 
                 int responseCode = connection.getResponseCode();
 
@@ -1471,6 +1503,7 @@ public class DvbIClient {
                     in.close();
                     return content.toString();
                 }
+                Log.w(TAG, "XML AIT HTTP " + responseCode + " for " + uri);
             } catch (IOException e) {
                 Log.e(TAG, "Error fetching XML AIT", e);
             }
@@ -1485,10 +1518,18 @@ public class DvbIClient {
 
         @Override
         protected void onPostExecute(XmlAitAttributes result) {
-            if (result != null) {
-                for (Callback cb : mCallbacks) {
-                    cb.onProcessXmlAit(result.xml, result.scheme);
+            if (result == null) {
+                return;
+            }
+            if (result.xml == null || result.xml.isEmpty()) {
+                Log.e(TAG, "XML AIT fetch failed scheme=" + result.scheme + " url=" + result.url);
+                if (LINKED_APP_SCHEME_1_2.equals(result.scheme)) {
+                    onLinkedApp12StartFailed("XML AIT fetch failed");
                 }
+                return;
+            }
+            for (Callback cb : mCallbacks) {
+                cb.onProcessXmlAit(result.xml, result.scheme);
             }
         }
     }
