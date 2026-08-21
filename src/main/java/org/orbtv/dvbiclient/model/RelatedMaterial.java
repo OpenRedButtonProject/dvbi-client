@@ -28,6 +28,12 @@ public class RelatedMaterial {
         return "application/vnd.dvb.ait+xml".equals(mMediaLocatorContentType);
     }
 
+    /** HbbTV Annex O.3 generic HTML (not an HbbTV XML AIT). */
+    public boolean isGenericHtmlContentType() {
+        return "text/html".equalsIgnoreCase(mMediaLocatorContentType)
+                || "application/xhtml+xml".equalsIgnoreCase(mMediaLocatorContentType);
+    }
+
     @Override
     public String toString() {
         return "- " + this.getClass().getSimpleName() + " -\n"

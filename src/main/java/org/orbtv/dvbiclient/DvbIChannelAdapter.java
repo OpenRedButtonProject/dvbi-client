@@ -1,6 +1,7 @@
 package org.orbtv.dvbiclient;
 
 import android.media.tv.TvContract;
+import android.util.Log;
 
 import org.orbtv.dvbiclient.model.IService;
 import org.orbtv.dvbiclient.model.RelatedMaterial;
@@ -14,6 +15,7 @@ import java.util.Locale;
 import java.util.Map;
 
 public class DvbIChannelAdapter {
+    private static final String TAG = DvbIChannelAdapter.class.getSimpleName();
     private static String PreferredUILanguage = "";
     private String mChannelType;
     private int mIdType;
@@ -109,6 +111,13 @@ public class DvbIChannelAdapter {
         for (RelatedMaterial relatedMaterial : relatedMaterials) {
             String howRelatedHref = relatedMaterial.getHowRelatedHref();
             String mediaLocatorContentType = relatedMaterial.getMediaLocatorContentType();
+            if (howRelatedHref != null && !mLinkedAppUris.containsKey(howRelatedHref) && mediaLocatorContentType != null &&
+                    relatedMaterial.isGenericHtmlContentType()) {
+                // HbbTV O.3 / ERRATA0500–0510: do not autostart generic HTML. If an HbbTV
+                // XML AIT is also signalled for this HowRelated, it is stored below.
+                Log.i(TAG, "Ignoring generic HTML linked app for " + howRelatedHref);
+                continue;
+            }
             if (howRelatedHref != null && !mLinkedAppUris.containsKey(howRelatedHref) && mediaLocatorContentType != null &&
                     (relatedMaterial.isXmlAitContentType() || DvbIClient.LINKED_APP_SCHEME_1000_1.equals(howRelatedHref))) {
                 String xmlUri = relatedMaterial.getMediaLocatorUri();

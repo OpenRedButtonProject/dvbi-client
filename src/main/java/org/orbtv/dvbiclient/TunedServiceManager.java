@@ -4,6 +4,7 @@ import android.util.Log;
 
 import org.orbtv.dvbiclient.model.AvailabilityPeriod;
 import org.orbtv.dvbiclient.model.Programme;
+import org.orbtv.dvbiclient.model.RelatedMaterial;
 import org.orbtv.dvbiclient.model.Service;
 import org.orbtv.dvbiclient.model.ServiceInstance;
 
@@ -217,11 +218,52 @@ public class TunedServiceManager {
         }
         for (int i = 0; i < instances.size(); i++) {
             ServiceInstance instance = instances.get(i);
-            if (isInstanceAvailable(instance) && (maxInstance == null || maxInstance.getPriority() > instance.getPriority())) {
+            if (isInstanceSelectable(instance) && (maxInstance == null || maxInstance.getPriority() > instance.getPriority())) {
                 maxInstance = instance;
             }
         }
         return maxInstance;
+    }
+
+    /**
+     * An instance is selectable on an HbbTV terminal if it is in its availability window and
+     * either has native media (DASH/RF) or a launchable HbbTV XML AIT. Generic-HTML-only
+     * linked apps (ERRATA0510) are not a reason to keep the instance selected.
+     */
+    private boolean isInstanceSelectable(ServiceInstance instance) {
+        if (!isInstanceAvailable(instance)) {
+            return false;
+        }
+        if (hasNativeDelivery(instance) || hasHbbtvXmlAitLinkedApp(instance)) {
+            return true;
+        }
+        Log.i(TAG, "Skipping instance with no native delivery and no HbbTV XML AIT "
+                + "(generic HTML linked app is not autostarted)");
+        return false;
+    }
+
+    private static boolean hasNativeDelivery(ServiceInstance instance) {
+        String uri = instance.getUri();
+        if (uri != null && !uri.isEmpty()) {
+            return true;
+        }
+        return instance.getTriplet() != null;
+    }
+
+    private static boolean hasHbbtvXmlAitLinkedApp(ServiceInstance instance) {
+        List<RelatedMaterial> materials = instance.getRelatedMaterials();
+        if (materials == null) {
+            return false;
+        }
+        for (RelatedMaterial material : materials) {
+            String href = material.getHowRelatedHref();
+            if (href != null
+                    && href.startsWith("urn:dvb:metadata:cs:LinkedApplicationCS:2019")
+                    && material.isXmlAitContentType()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean isInstanceAvailable(ServiceInstance instance) {
