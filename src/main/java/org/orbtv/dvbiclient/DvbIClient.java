@@ -104,6 +104,9 @@ public class DvbIClient {
     private String mPendingLinkedAppScheme;
     /** App-pinned instance is outside its Availability Period; ignore DASH PLAYING until it returns. */
     private volatile boolean mPinnedInstanceOutsideWindow = false;
+    /** App (LA 1.2 / A/V Control) holds AV decoders; native DASH/RF must wait (A.2.4.1). */
+    private volatile boolean mPresentationSuspended = false;
+    private String mPendingDashUri;
     private final TunedServiceManager.Callback mServiceManagerCallback = new TunedServiceManager.Callback() {
         @Override
         public void onInstanceChanged(ServiceInstance fromInstance, ServiceInstance toInstance) {
@@ -280,6 +283,7 @@ public class DvbIClient {
                     + service.getUniqueIdentifier());
                 return;
             }
+            clearPendingNativePresentation();
             int contentAge = resolveContentAge(service);
             boolean blocked = isParentalBlocked(contentAge);
             Log.d(TAG, "PARENTAL_RATING 1.1/native: service=" + service.getUniqueIdentifier()
@@ -298,10 +302,19 @@ public class DvbIClient {
             launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1_1), LINKED_APP_SCHEME_1_1);
             if ("dvb-dash".equals(toInstance.getDeliveryType())) {
                 mTvInputCallback.tuneOffBroadcast();
-                if (mDvbIView.tune(uri, mSubtitlesEnabled) && !PLAYER_STATUS_STARTING.equals(mLastState)) {
-                    mLastState = PLAYER_STATUS_STARTING;
+                if (mPresentationSuspended) {
+                    Log.i(TAG, "DECODER: deferring DASH until app releases decoders");
+                    mPendingDashUri = uri;
+                    dispatchStartingIfNeeded(channel.getOnid(), channel.getTsid(), channel.getSid());
+                    return;
+                }
+                if (mDvbIView.tune(uri, mSubtitlesEnabled)) {
+                    dispatchStartingIfNeeded(channel.getOnid(), channel.getTsid(), channel.getSid());
+                } else {
+                    Log.e(TAG, "DASH tune failed for " + uri);
+                    mLastState = PLAYER_STATUS_ERROR;
                     dispatchPlayerStatusChangedEvent(channel.getOnid(), channel.getTsid(),
-                        channel.getSid(), PLAYER_STATUS_STARTING);
+                        channel.getSid(), PLAYER_STATUS_ERROR);
                 }
             } else {
                 Log.i(TAG, "RF_TUNE_DEBUG: switching to broadcast instance, deliveryType="
@@ -312,18 +325,23 @@ public class DvbIClient {
                 mIsUnselected.clear();
                 Triplet rfTriplet = toInstance.getTriplet();
                 if (rfTriplet != null) {
+                    if (!PLAYER_STATUS_STARTING.equals(mLastState)) {
+                        mLastState = PLAYER_STATUS_STARTING;
+                        dispatchPlayerStatusChangedEvent(
+                            rfTriplet.getOrigNetId(),
+                            rfTriplet.getTsId(),
+                            rfTriplet.getServiceId(),
+                            PLAYER_STATUS_STARTING);
+                    }
+                    // A.2.4.1 / ERRATA0710–0720: still tune RF so AIT/SI are
+                    // acquired. DvbGlue.tune() keeps decoding stopped while
+                    // the app holds the AV decoders; v/b stays CONNECTING.
+                    if (mPresentationSuspended) {
+                        Log.i(TAG, "DECODER: tuning RF with decoding suspended (AIT); app holds decoders");
+                    }
                     Log.i(TAG, "RF_TUNE_DEBUG: calling tuneBroadcast(" + rfTriplet + ")");
                     boolean tuned = mTvInputCallback.tuneBroadcast(rfTriplet.toString());
-                    if (tuned) {
-                        if (!PLAYER_STATUS_STARTING.equals(mLastState)) {
-                            mLastState = PLAYER_STATUS_STARTING;
-                            dispatchPlayerStatusChangedEvent(
-                                rfTriplet.getOrigNetId(),
-                                rfTriplet.getTsId(),
-                                rfTriplet.getServiceId(),
-                                PLAYER_STATUS_STARTING);
-                        }
-                    } else {
+                    if (!tuned) {
                         Log.e(TAG, "RF_TUNE_DEBUG: tuneBroadcast failed for " + rfTriplet);
                         mLastState = PLAYER_STATUS_ERROR;
                         dispatchPlayerStatusChangedEvent(
@@ -354,6 +372,7 @@ public class DvbIClient {
                 + ", overridden=" + mTvInputCallback.isParentalAccessOverridden()
                 + ", blocked=" + blocked);
             // Linked app controlling media: terminal does not start DASH itself.
+            clearPendingNativePresentation();
             mTvInputCallback.tuneOffBroadcast();
             mDvbIView.tuneOff();
             if (blocked) {
@@ -670,6 +689,10 @@ public class DvbIClient {
                 Log.w(TAG, "Ignoring PLAYING while pinned instance is outside availability window");
                 return;
             }
+            if (PLAYER_STATUS_PLAYING.equals(eventName) && mPresentationSuspended) {
+                Log.w(TAG, "Ignoring PLAYING while app holds decoders");
+                return;
+            }
             dispatchPlayerStatusChangedEvent(onid, tsid, sid, eventName);
             switch (eventName) {
                 case PLAYER_STATUS_PLAYING:
@@ -917,6 +940,7 @@ public class DvbIClient {
         boolean blocked = mBlocked;
         mBlocked = false;
         mPinnedInstanceOutsideWindow = false;
+        clearPendingNativePresentation();
         mOverrideRequestPending = false;
         mTvInputCallback.clearParentalAccessOverride();
         mPendingLinkedAppUrl = null;
@@ -941,6 +965,7 @@ public class DvbIClient {
     public synchronized void tuneOff() {
         mLastState = null;
         mPinnedInstanceOutsideWindow = false;
+        clearPendingNativePresentation();
         mServiceManager.tuneOff();
         mStreamEventsLookup.clear();
         mTracks.clear();
@@ -950,7 +975,39 @@ public class DvbIClient {
     }
 
     public void setPresentationSuspended(boolean suspend) {
+        mPresentationSuspended = suspend;
         mDvbIView.setPresentationSuspended(suspend);
+        if (!suspend) {
+            startPendingNativePresentation();
+        }
+    }
+
+    private void clearPendingNativePresentation() {
+        mPendingDashUri = null;
+    }
+
+    /** A.2.4.1: start deferred DASH once the app has released the decoders.
+     * RF is already tuned (AIT); DvbGlue startDecoding runs from unsuspend. */
+    private void startPendingNativePresentation() {
+        if (mPresentationSuspended || mBlocked) {
+            return;
+        }
+        if (mPendingDashUri != null) {
+            String uri = mPendingDashUri;
+            mPendingDashUri = null;
+            Log.i(TAG, "DECODER: starting deferred DASH after app released decoders");
+            mTvInputCallback.tuneOffBroadcast();
+            if (!mDvbIView.tune(uri, mSubtitlesEnabled)) {
+                Log.e(TAG, "DECODER: deferred DASH tune failed for " + uri);
+                mLastState = PLAYER_STATUS_ERROR;
+                Triplet triplet = getHbbtvChannelStatusTriplet();
+                if (triplet != null) {
+                    dispatchPlayerStatusChangedEvent(
+                        triplet.getOrigNetId(), triplet.getTsId(), triplet.getServiceId(),
+                        PLAYER_STATUS_ERROR);
+                }
+            }
+        }
     }
 
     public void setVideoRectangle(int x, int y, int width, int height) {
@@ -1363,6 +1420,13 @@ public class DvbIClient {
                 .build();
         }
         return null;
+    }
+
+    private void dispatchStartingIfNeeded(int onid, int tsid, int sid) {
+        if (!PLAYER_STATUS_STARTING.equals(mLastState)) {
+            mLastState = PLAYER_STATUS_STARTING;
+            dispatchPlayerStatusChangedEvent(onid, tsid, sid, PLAYER_STATUS_STARTING);
+        }
     }
 
     private void dispatchPlayerStatusChangedEvent(int onid, int tsid, int sid, String event) {
