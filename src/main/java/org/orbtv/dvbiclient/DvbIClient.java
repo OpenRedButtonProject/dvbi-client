@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.media.tv.TvInputManager;
 import android.media.tv.TvTrackInfo;
+import android.os.Looper;
 import android.util.Log;
 import android.view.View;
 
@@ -124,6 +125,10 @@ public class DvbIClient {
                     String uri = toInstance.getUri();
                     channel = channelBuilder.setServiceInstance(toInstance).build();
                     Log.i(TAG, "---------- channel info ----------\n" + channel + "\n------------------------------------");
+                    // Set HowRelated before tune/AIT so ChannelChangeSucceeded can read it
+                    // (A.2.20.6 / ERRATA0900). handleNative generates RF status that the
+                    // polyfill may treat as CCS while this method is still running.
+                    publishApplicationHowRelatedHref(service, toInstance, false);
                     String app_1_2 = channel.getLinkedAppUri(LINKED_APP_SCHEME_1_2);
                     if (app_1_2 == null) {
                         handleNativeOrLinkedApp1_1(channel, toInstance, service, uri);
@@ -169,6 +174,7 @@ public class DvbIClient {
                             mDvbIView.loadUrl(channel.getLinkedAppUri(LINKED_APP_SCHEME_1000_1));
                         });
                     }
+                    publishApplicationHowRelatedHref(service, fromInstance, true);
                 }
             }
         }
@@ -197,6 +203,7 @@ public class DvbIClient {
                 mLastState = PLAYER_STATUS_STARTING;
                 dispatchPlayerStatusChangedEvent(
                         channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
+                publishApplicationHowRelatedHref(service, instance, true);
                 return;
             }
             if (!mPinnedInstanceOutsideWindow) {
@@ -204,6 +211,7 @@ public class DvbIClient {
             }
             Log.i(TAG, "PINNED_AVAIL: instance re-entered availability window; resuming presentation");
             mPinnedInstanceOutsideWindow = false;
+            publishApplicationHowRelatedHref(service, instance, false);
             if (mBlocked) {
                 return;
             }
@@ -476,6 +484,69 @@ public class DvbIClient {
                 channel.getOnid(), channel.getTsid(), channel.getSid(), PLAYER_STATUS_STARTING);
         }
     };
+
+    /**
+     * HbbTV A.2.20.6: current HowRelated@href for the running app, or null if the
+     * app is not currently attributed to DVB-I signalling (e.g. classic AIT).
+     */
+    private void publishApplicationHowRelatedHref(Service service, ServiceInstance instance,
+            boolean outsideAvailability) {
+        String href = null;
+        if (outsideAvailability) {
+            if (serviceHasLinkedApp(service, LINKED_APP_SCHEME_2)) {
+                href = LINKED_APP_SCHEME_2;
+            }
+        } else {
+            href = getInstanceHowRelatedHref(instance);
+        }
+        Log.i(TAG, "HOW_RELATED: href=" + href + ", outside=" + outsideAvailability);
+        final String publishedHref = href;
+        Runnable publish = () -> {
+            for (Callback cb : mCallbacks) {
+                cb.onApplicationHowRelatedHrefChanged(publishedHref);
+            }
+        };
+        // OrbSession JNI must not run on TunedServiceManager's poller. Queue on
+        // main before handleNative so HowRelated is ahead of ChannelChangeSucceeded.
+        if (Looper.getMainLooper().isCurrentThread()) {
+            publish.run();
+        } else {
+            mDvbIView.getContext().getMainExecutor().execute(publish);
+        }
+    }
+
+    /** Instance-level 1.1 / 1.2 only; does not fall back to service-level type 2. */
+    private static String getInstanceHowRelatedHref(ServiceInstance instance) {
+        if (instance == null) {
+            return null;
+        }
+        String href11 = null;
+        for (RelatedMaterial rm : instance.getRelatedMaterials()) {
+            String href = rm.getHowRelatedHref();
+            if (href == null || !rm.isXmlAitContentType()) {
+                continue;
+            }
+            if (LINKED_APP_SCHEME_1_2.equals(href)) {
+                return href;
+            }
+            if (LINKED_APP_SCHEME_1_1.equals(href)) {
+                href11 = href;
+            }
+        }
+        return href11;
+    }
+
+    private static boolean serviceHasLinkedApp(Service service, String scheme) {
+        if (service == null) {
+            return false;
+        }
+        for (RelatedMaterial rm : service.getRelatedMaterials()) {
+            if (scheme.equals(rm.getHowRelatedHref()) && rm.isXmlAitContentType()) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     private final DvbIView.JSCallback mJSCallback = new DvbIView.JSCallback() {
 
@@ -1662,6 +1733,7 @@ public class DvbIClient {
 
     public static class Callback {
         protected void onProcessXmlAit(String xmlAit, String scheme) { }
+        protected void onApplicationHowRelatedHrefChanged(String href) { }
         protected void onDashStreamEvent(int listenId, String name, String status, String Id,
                                          double startTime, double duration, String data, String contentEncoding) { }
         protected void onTracksUpdated() { }
