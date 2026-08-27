@@ -95,7 +95,7 @@ public class DvbIClient {
     private HashMap<Integer, TvTrackInfo> mSelectedTracks = new HashMap<>(); // TODO: should it be part of TunedServiceManager?
     private boolean mSubtitlesEnabled = false;
     private HashMap<Integer, Boolean> mIsUnselected = new HashMap<>();
-    private ITvInputCallback mTvInputCallback;
+    private volatile ITvInputCallback mTvInputCallback;
     private final EpgManager mEpgManager;
     private final TunedServiceManager mServiceManager;
     private List<String> mUpdatedServiceEPGs = new ArrayList<>();
@@ -335,10 +335,16 @@ public class DvbIClient {
                 if (rfTriplet != null) {
                     if (!PLAYER_STATUS_STARTING.equals(mLastState)) {
                         mLastState = PLAYER_STATUS_STARTING;
+                        // HbbTV CCS is for the DVB-I Channel the app setChannel'd
+                        // (e.g. 6,16561,2), not the RF delivery triplet (99,1,12).
+                        Triplet status = hbbtvStatusTriplet(service, channel);
+                        if (status == null) {
+                            status = rfTriplet;
+                        }
                         dispatchPlayerStatusChangedEvent(
-                            rfTriplet.getOrigNetId(),
-                            rfTriplet.getTsId(),
-                            rfTriplet.getServiceId(),
+                            status.getOrigNetId(),
+                            status.getTsId(),
+                            status.getServiceId(),
                             PLAYER_STATUS_STARTING);
                     }
                     // A.2.4.1 / ERRATA0710–0720: still tune RF so AIT/SI are
@@ -352,10 +358,14 @@ public class DvbIClient {
                     if (!tuned) {
                         Log.e(TAG, "RF_TUNE_DEBUG: tuneBroadcast failed for " + rfTriplet);
                         mLastState = PLAYER_STATUS_ERROR;
+                        Triplet status = hbbtvStatusTriplet(service, channel);
+                        if (status == null) {
+                            status = rfTriplet;
+                        }
                         dispatchPlayerStatusChangedEvent(
-                            rfTriplet.getOrigNetId(),
-                            rfTriplet.getTsId(),
-                            rfTriplet.getServiceId(),
+                            status.getOrigNetId(),
+                            status.getTsId(),
+                            status.getServiceId(),
                             PLAYER_STATUS_ERROR);
                     }
                 } else {
@@ -824,13 +834,14 @@ public class DvbIClient {
         mServiceManager.registerCallback(mServiceManagerCallback);
     }
 
-    public void setTvInputCallback(ITvInputCallback callback) {
+    public synchronized void setTvInputCallback(ITvInputCallback callback) {
         if (callback == null) {
             mTvInputCallback = mFallbackCallback;
         }
         else {
             mTvInputCallback = callback;
             mTvInputCallback.updateEventPeriods();
+            onParentalControlAgeChanged();
         }
     }
 
@@ -1482,19 +1493,19 @@ public class DvbIClient {
     }
 
     /**
-     * Triplet for HbbTV channel-status events: prefer the active delivery instance
-     * (e.g. RF 99:1:12) over the DVB-I service-identifier triplet (e.g. 5:2774:2).
+     * Triplet for HbbTV channel-status / CCS. Always the DVB-I Channel identity the
+     * application selected (AdditionalServiceParameters / UniqueIdentifier), never the
+     * RF instance delivery triplet. Tuner lock still uses {@link ServiceInstance#getTriplet()}.
      */
-    private Triplet getHbbtvChannelStatusTriplet() {
-        ServiceInstance instance = mServiceManager.getTunedInstance();
-        if (instance != null && instance.getTriplet() != null) {
-            return instance.getTriplet();
-        }
-        Service service = mServiceManager.getTunedService();
+    public Triplet getHbbtvChannelStatusTriplet() {
+        return hbbtvStatusTriplet(mServiceManager.getTunedService(),
+            mServiceManager.getTunedChannel());
+    }
+
+    private static Triplet hbbtvStatusTriplet(Service service, DvbIChannelAdapter channel) {
         if (service != null && service.getTriplet() != null) {
             return service.getTriplet();
         }
-        DvbIChannelAdapter channel = mServiceManager.getTunedChannel();
         if (channel != null) {
             return new Triplet.Builder()
                 .setOrigNetId(channel.getOnid())

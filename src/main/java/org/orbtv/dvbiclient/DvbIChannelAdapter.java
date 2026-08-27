@@ -163,41 +163,10 @@ public class DvbIChannelAdapter {
     }
 
     private int determineIdType(Service service) {
-        List<ServiceInstance> instances = service.getInstances();
-        String deliveryType = null;
-
-        boolean sameDeliveryType = true;
-        for (ServiceInstance instance : instances) {
-            String instanceDeliveryType = instance.getDeliveryType();
-            if (instanceDeliveryType == null || instanceDeliveryType.isEmpty()) {
-                sameDeliveryType = false;
-                break;
-            }
-            if (deliveryType == null) {
-                deliveryType = instanceDeliveryType;
-            } else if (!deliveryType.equalsIgnoreCase(instanceDeliveryType)) {
-                sameDeliveryType = false;
-                break;
-            }
-        }
-
-        // Determine the appropriate ID type based on the deliveryType and the additionalServiceParameters
-        // T2/S2 support?
-        if (sameDeliveryType && deliveryType != null && service.getTriplet() != null) {
-            String lowerCaseDeliveryType = deliveryType.toLowerCase();
-            switch (lowerCaseDeliveryType) {
-                case "dvb-c":
-                    //return "ID_DVB_C";
-                    return 10;
-                case "dvb-t":
-                    //return "ID_DVB_T";
-                    return 12;
-                case "dvb-s":
-                    //return "ID_DVB_S";
-                    return 11;
-            }
-        }
-
+        // A DVB-I *service* Channel is always ID_DVB_I (50), even when every instance is
+        // DVB-T/C/S. Instance Channels keep the delivery idType (see overload below).
+        // Returning ID_DVB_T here made AppMgr treat DVB-I→RF setChannel as isDvbi=0
+        // (ERRATA0710 / ERRATA0720).
         return 50;
     }
 
