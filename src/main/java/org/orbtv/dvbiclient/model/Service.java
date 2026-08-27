@@ -152,10 +152,7 @@ public class Service implements IService {
                             currentService.mContentGuideServiceRef = xpp.nextText();
                             break;
                         case "ParentalRating":
-                            String ratingText = xpp.nextText();
-                            currentService.mParentalRating = Integer.parseInt(ratingText);
-                            Log.d(TAG, "PARENTAL_RATING_DEBUG: Parsed ParentalRating from service list: " + ratingText +
-                                " for service: " + (currentService.mUniqueIdentifier != null ? currentService.mUniqueIdentifier : "unknown"));
+                            parseParentalRating(currentService, xpp);
                             break;
                         case "UniqueIdentifier":
                             currentService.mUniqueIdentifier = xpp.nextText();
@@ -188,6 +185,38 @@ public class Service implements IService {
             eventType = xpp.next();
         }
         return services;
+    }
+
+    /**
+     * TS 103 770 §5.5.28 ParentalRatingType: child {@code MinimumAge} elements, not text content.
+     * GUIDE0015 (and any list with nested MinimumAge) used to abort the whole import via nextText().
+     */
+    private static void parseParentalRating(Service service, XmlPullParser xpp) throws Exception {
+        Integer minAge = null;
+        int eventType = xpp.next();
+        while (!(eventType == XmlPullParser.END_TAG && "ParentalRating".equals(xpp.getName()))
+                && eventType != XmlPullParser.END_DOCUMENT) {
+            if (eventType == XmlPullParser.START_TAG && "MinimumAge".equals(xpp.getName())) {
+                String ageText = xpp.nextText();
+                if (ageText != null && !ageText.trim().isEmpty()) {
+                    minAge = Integer.parseInt(ageText.trim());
+                }
+            } else if (eventType == XmlPullParser.TEXT && minAge == null) {
+                String text = xpp.getText();
+                if (text != null && !text.trim().isEmpty()) {
+                    try {
+                        minAge = Integer.parseInt(text.trim());
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+            eventType = xpp.next();
+        }
+        if (minAge != null) {
+            service.mParentalRating = minAge;
+            Log.d(TAG, "PARENTAL_RATING_DEBUG: Parsed ParentalRating from service list: " + minAge +
+                " for service: " + (service.mUniqueIdentifier != null ? service.mUniqueIdentifier : "unknown"));
+        }
     }
 
     private static void parseAdditionalParameters(Service service, XmlPullParser xpp) throws Exception {
@@ -285,7 +314,7 @@ public class Service implements IService {
             mInstance.mContentGuideServiceRef = value;
             return this;
         }
-        public Service.Builder setParentalRating(int value) {
+        public Service.Builder setParentalRating(Integer value) {
             mInstance.mParentalRating = value;
             return this;
         }

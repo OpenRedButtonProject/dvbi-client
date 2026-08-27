@@ -1403,23 +1403,35 @@ public class DvbIClient {
         String uid = extractUidFromDvbChannel(channel);
         if (uid != null) {
             List<Programme> programmes = mDbHandler.getProgrammesForService(uid, start, end, limit);
+            Service service = mDbHandler.getServiceForUID(uid);
             for (Programme programme : programmes) {
                 InternalProviderData data = new InternalProviderData();
+                int minAge = programme.getMinimumAge();
+                String ratingScheme = programme.getParentalRatingScheme();
+                if (minAge <= 0) {
+                    if (service != null && service.getParentalRating() != null) {
+                        minAge = service.getParentalRating();
+                        if (minAge != 255) {
+                            ratingScheme = "dvb-si";
+                        }
+                    }
+                } else if (minAge != 255 && (ratingScheme == null || ratingScheme.isEmpty())) {
+                    ratingScheme = "dvb-si";
+                }
                 try {
-                    data.put("RATING", programme.getMinimumAge());
-                    data.put("RATING_SCHEME", programme.getParentalRatingScheme());
+                    data.put("RATING", minAge);
+                    data.put("RATING_SCHEME", ratingScheme);
                     data.put("DVB_URI", programme.getProgramId());
-                    data.put("PROGRAM_ID_TYPE", 0);
+                    data.put("PROGRAM_ID_TYPE", 0); // ID_TVA_CRID (HbbTV O.6.2.2)
                 } catch (InternalProviderData.ParseException e) {
                     e.printStackTrace();
                 }
-                //Log.i(TAG, programme.toString());
 
                 events.add(new Program.Builder()
                         .setChannelId(channel.getId())
                         .setTitle(programme.getTitle())
                         .setDescription(programme.getMediumDescription())
-                        .setLongDescription(programme.getLongDescription())
+                        // HbbTV O.6.2.2: longDescription is undefined for DVB-I DASH.
                         .setStartTimeUtcMillis(programme.getStartTime() * 1000)
                         .setEndTimeUtcMillis(programme.getEndTime() * 1000)
                         // Age stays in InternalProviderData for HbbTV. Do not publish
@@ -1580,7 +1592,7 @@ public class DvbIClient {
                 Log.e(TAG, "Error sending request", e);
             }
             catch(Exception e) {
-                Log.e(TAG, "Error configuring SSL context", e);
+                Log.e(TAG, "Error loading service list", e);
             }
             return null;
         }

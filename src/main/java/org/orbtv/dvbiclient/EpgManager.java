@@ -101,7 +101,9 @@ public class EpgManager {
         if (node != null) {
             Programme.Builder builder = new Programme.Builder();
             findDescriptions(node, builder);
-            findParentalGuidance(node, builder);
+            if (!findParentalGuidance(node, builder)) {
+                applyServiceParentalFallback(builder, service);
+            }
             findTitle(node, builder);
             findStartEndTimes(node, builder, System.currentTimeMillis() / 1000, duration);
             findProgramId(baseNode, builder, "crid://" + service.getUniqueIdentifier());
@@ -124,16 +126,30 @@ public class EpgManager {
     }
 
     private void findTitle(XmlNode node, Programme.Builder builder) {
-        node = node.getDescendantByName("Title");
-        if (node != null) {
-            builder.setTitle(node.getInnerText());
+        List<XmlNode> titles = node.getDescendantsByName("Title");
+        XmlNode chosen = null;
+        for (XmlNode title : titles) {
+            if ("main".equals(title.getAttribute("type"))) {
+                chosen = title;
+                break;
+            }
+            if (chosen == null) {
+                chosen = title;
+            }
+        }
+        if (chosen != null) {
+            builder.setTitle(chosen.getInnerText());
         }
     }
 
     private void findDescriptions(XmlNode node, Programme.Builder builder) {
         List<XmlNode> descriptions = node.getDescendantsByName("Synopsis");
         for (XmlNode desc : descriptions) {
-            switch (desc.getAttribute("length")) {
+            String length = desc.getAttribute("length");
+            if (length == null) {
+                length = "medium";
+            }
+            switch (length) {
                 case "short":
                     builder.setShortDescription(desc.getInnerText());
                     break;
@@ -147,32 +163,57 @@ public class EpgManager {
         }
     }
 
-    private void findParentalGuidance(XmlNode node, Programme.Builder builder) {
+    /**
+     * @return true if ProgramInformation ParentalGuidance was present (HbbTV O.6.2.2).
+     */
+    private boolean findParentalGuidance(XmlNode node, Programme.Builder builder) {
         final List<String> minimumAgeNames = Arrays.asList("MinimumAge", "mpeg7:MinimumAge");
         final List<String> parentalRatingNames = Arrays.asList("ParentalRating", "mpeg7:ParentalRating");
-        String minAge = "0";
+        List<XmlNode> parentalGuidanceNodes = node.getDescendantsByName("ParentalGuidance");
+        if (parentalGuidanceNodes.isEmpty()) {
+            return false;
+        }
+        String minAge;
         String ratingScheme = null;
         String explanatoryText = null;
-        List<XmlNode> parentalGuidanceNodes = node.getDescendantsByName("ParentalGuidance");
-        if (!parentalGuidanceNodes.isEmpty()) {
-            XmlNode n = parentalGuidanceNodes.get(0).getFirstChild();
-            if (n != null && minimumAgeNames.contains(n.getName())) {
-                minAge = n.getInnerText();
-                if (parentalGuidanceNodes.size() > 1) {
-                    n = parentalGuidanceNodes.get(1).getFirstChild();
-                    if (n != null && parentalRatingNames.contains(n.getName())) {
-                        ratingScheme = n.getAttribute("href");
-                        n = n.getNextSibling();
-                        if (n != null) {
-                            explanatoryText = n.getInnerText();
-                        }
-                    }
+        XmlNode n = parentalGuidanceNodes.get(0).getFirstChild();
+        if (n == null || !minimumAgeNames.contains(n.getName())) {
+            return false;
+        }
+        minAge = n.getInnerText();
+        if (minAge == null) {
+            return false;
+        }
+        if (parentalGuidanceNodes.size() > 1) {
+            n = parentalGuidanceNodes.get(1).getFirstChild();
+            if (n != null && parentalRatingNames.contains(n.getName())) {
+                ratingScheme = n.getAttribute("href");
+                n = n.getNextSibling();
+                if (n != null) {
+                    explanatoryText = n.getInnerText();
                 }
             }
         }
-        builder.setMinimumAge(Integer.parseInt(minAge))
-                .setParentalRatingScheme(ratingScheme)
-                .setParentalRatingDescription(explanatoryText);
+        try {
+            builder.setMinimumAge(Integer.parseInt(minAge))
+                    .setParentalRatingScheme(ratingScheme)
+                    .setParentalRatingDescription(explanatoryText);
+        } catch (NumberFormatException e) {
+            return false;
+        }
+        return true;
+    }
+
+    /** HbbTV O.6.2.2: if programme ParentalGuidance is absent, use Service/ParentalRating. */
+    private void applyServiceParentalFallback(Programme.Builder builder, Service service) {
+        if (service == null || service.getParentalRating() == null) {
+            return;
+        }
+        int minAge = service.getParentalRating();
+        builder.setMinimumAge(minAge);
+        if (minAge != 255) {
+            builder.setParentalRatingScheme("dvb-si");
+        }
     }
 
     private void findStartEndTimes(XmlNode node, Programme.Builder builder, long fallbackStart, long fallbackDuration) {
@@ -232,7 +273,9 @@ public class EpgManager {
                             if (!serviceRef.isEmpty()) {
                                 Uri baseUriSchedule = Uri.parse(guide.getScheduleInfoEndpointURI());
                                 Uri.Builder builder = baseUriSchedule.buildUpon();
-                                builder.appendQueryParameter("sid", uid);
+                                // TS 103 770 §6.5.3.1: sid = UniqueIdentifier or ContentGuideServiceRef
+                                // (latter wins).
+                                builder.appendQueryParameter("sid", serviceRef);
 
                                 Uri baseUriProgram = null;
                                 String ProgramInfoEndpointURI =  guide.getProgramInfoEndpointURI();
@@ -338,11 +381,14 @@ public class EpgManager {
                     XmlNode epgMetadata = fetchDataFromUri(new URL(uBuilder.build().toString()));
                     XmlNode epgProgramInfoMetadata = null;
 
-                    if (!mTaskInfo.isNowNext && (epgMetadata == null || epgMetadata.getChildrenCount() == 0)) {
-                        mTaskInfo.isNowNext = true;
+                    if ((epgMetadata == null || epgMetadata.getChildrenCount() == 0)
+                            && !mTaskInfo.triedAlternateQuery) {
+                        mTaskInfo.triedAlternateQuery = true;
+                        mTaskInfo.isNowNext = !mTaskInfo.isNowNext;
                         return doInBackground();
                     }
-                    mTaskInfo.isNowNext = false;
+                    mTaskInfo.triedAlternateQuery = false;
+                    mTaskInfo.isNowNext = true;
 
                     if (mTaskInfo.nextUpdate == null) {
                         // TODO: update request time
@@ -356,34 +402,66 @@ public class EpgManager {
                         List<XmlNode> programmesInfo = epgMetadata.getDescendantsByName("ProgramInformation");
                         Uri auxEndPointUri = mTaskInfo.getmAuxEndPointUri();
                         mUpdatedServices.add(mTaskInfo.getServiceUID());
+                        Service service = mDbHandler.getServiceForUID(mTaskInfo.getServiceUID());
 
-                        for (XmlNode info : programmesInfo) {
-                            Programme.Builder pBuilder = new Programme.Builder();
-                            String programId = info.getAttribute("programId");
-                            if (programId != null) {
-                                for (XmlNode event : scheduleEvents) {
-                                    XmlNode programNode = event.getDescendantByName("Program");
-                                    if (programNode != null && programId.equals(programNode.getAttribute("crid"))) {
-                                        findStartEndTimes(event, pBuilder, System.currentTimeMillis() / 1000, SECONDS_OF_DAY);
-                                        if (auxEndPointUri != null && !auxEndPointUri.toString().isEmpty()) {
-                                            Uri.Builder auxBuilder = auxEndPointUri.buildUpon();
-                                            auxBuilder.appendQueryParameter("pid", programId);
-                                            epgProgramInfoMetadata = fetchDataFromUri(new URL(auxBuilder.build().toString()));
-                                            if (epgProgramInfoMetadata != null) {
-                                                findOnDemandProgram(epgProgramInfoMetadata, event, programId, pBuilder);
-                                            }
-                                        }
-                                        break;
+                        if (!scheduleEvents.isEmpty()) {
+                            for (XmlNode event : scheduleEvents) {
+                                Programme.Builder pBuilder = new Programme.Builder();
+                                XmlNode programNode = event.getDescendantByName("Program");
+                                String programId = null;
+                                if (programNode != null) {
+                                    programId = programNode.getAttribute("crid");
+                                    if (programId == null) {
+                                        programId = programNode.getAttribute("programId");
                                     }
                                 }
-                            }
-                            findDescriptions(info, pBuilder);
-                            findParentalGuidance(info, pBuilder);
-                            findTitle(info, pBuilder);
+                                findStartEndTimes(event, pBuilder, System.currentTimeMillis() / 1000, SECONDS_OF_DAY);
 
-                            programmes.add(pBuilder
-                                    .setProgramId(programId)
-                                    .build());
+                                XmlNode info = null;
+                                if (programId != null) {
+                                    for (XmlNode pi : programmesInfo) {
+                                        if (programId.equals(pi.getAttribute("programId"))
+                                                || programId.equals(pi.getAttribute("crid"))) {
+                                            info = pi;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (info != null) {
+                                    if (auxEndPointUri != null && !auxEndPointUri.toString().isEmpty()) {
+                                        Uri.Builder auxBuilder = auxEndPointUri.buildUpon();
+                                        auxBuilder.appendQueryParameter("pid", programId);
+                                        epgProgramInfoMetadata = fetchDataFromUri(new URL(auxBuilder.build().toString()));
+                                        if (epgProgramInfoMetadata != null) {
+                                            findOnDemandProgram(epgProgramInfoMetadata, event, programId, pBuilder);
+                                        }
+                                    }
+                                    findDescriptions(info, pBuilder);
+                                    if (!findParentalGuidance(info, pBuilder)) {
+                                        applyServiceParentalFallback(pBuilder, service);
+                                    }
+                                    findTitle(info, pBuilder);
+                                } else {
+                                    applyServiceParentalFallback(pBuilder, service);
+                                }
+                                programmes.add(pBuilder
+                                        .setProgramId(programId)
+                                        .build());
+                            }
+                        } else {
+                            for (XmlNode info : programmesInfo) {
+                                Programme.Builder pBuilder = new Programme.Builder();
+                                String programId = info.getAttribute("programId");
+                                findStartEndTimes(info, pBuilder, System.currentTimeMillis() / 1000, SECONDS_OF_DAY);
+                                findDescriptions(info, pBuilder);
+                                if (!findParentalGuidance(info, pBuilder)) {
+                                    applyServiceParentalFallback(pBuilder, service);
+                                }
+                                findTitle(info, pBuilder);
+                                programmes.add(pBuilder
+                                        .setProgramId(programId)
+                                        .build());
+                            }
                         }
                     }
                     return programmes;
@@ -424,7 +502,8 @@ public class EpgManager {
 
     private static class EpgTaskInfo {
         public Long nextUpdate = null;
-        public boolean isNowNext = false;
+        public boolean isNowNext = true;
+        public boolean triedAlternateQuery = false;
         public Uri mEndPointUri;
         public Uri mAuxEndPointUri;
         private String mServiceUID;

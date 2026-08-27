@@ -210,7 +210,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                         .setInstances(getServiceInstancesForUID(db, cursor.getString(1)))
                         .setRelatedMaterials(getRelatedMaterials(db, FOREIGN_KEY_PREFIX_SERVICE + cursor.getString(1)))
                         .setContentGuideSource(getContendGuideForCGSID(db, cursor.getString(5)))
-                        .setParentalRating(cursor.getInt(6))
+                        .setParentalRating(cursor.isNull(6) ? null : cursor.getInt(6))
                         .setContentGuideServiceRef(cursor.getString(7));
                 if (networkId != null) {
                     serviceBuilder.setNetworkId(networkId);
@@ -396,7 +396,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                             .setInstances(getServiceInstancesForUID(db, cursor.getString(1)))
                             .setRelatedMaterials(getRelatedMaterials(db, FOREIGN_KEY_PREFIX_SERVICE + cursor.getString(1)))
                             .setContentGuideSource(getContendGuideForCGSID(db, cursor.getString(5)))
-                            .setParentalRating(cursor.getInt(6))
+                            .setParentalRating(cursor.isNull(6) ? null : cursor.getInt(6))
                             .setContentGuideServiceRef(cursor.getString(7));
                     if (networkId != null) {
                         builder.setNetworkId(networkId);
