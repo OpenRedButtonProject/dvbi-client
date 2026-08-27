@@ -262,11 +262,13 @@ public class DvbIClient {
                     return;
                 }
                 boolean wasBlocked = mBlocked;
-                mBlocked = blocked;
                 invalidateErrorTimer();
                 if (wasBlocked && !blocked && !naturallyBlocked) {
                     mTvInputCallback.clearParentalAccessOverride();
                 }
+                // Do not set mBlocked here. handleLinkedApp1_2 / handleNativeOrLinkedApp1_1
+                // own that flag when they enforce (kill/PIN). Setting it first made the
+                // "already blocked" guard skip the first pass (ERRATA0100/0120 spinner).
                 ServiceInstance instance = mServiceManager.getTunedInstance();
                 if (instance != null) {
                     onInstanceChanged(instance, instance);
@@ -394,6 +396,10 @@ public class DvbIClient {
             mTvInputCallback.tuneOffBroadcast();
             mDvbIView.tuneOff();
             if (blocked) {
+                if (mBlocked) {
+                    Log.i(TAG, "PARENTAL_RATING 1.2: already blocked; ignore extra instance change");
+                    return;
+                }
                 mBlocked = true;
                 mTvInputCallback.destroyHbbtvApplication();
                 handleRatingBlocked(channel);
@@ -1018,6 +1024,18 @@ public class DvbIClient {
     }
 
     public synchronized boolean tune(String uid, int instanceIndex) {
+        Service current = mServiceManager.getTunedService();
+        ServiceInstance currentInst = mServiceManager.getTunedInstance();
+        if (current != null && uid != null
+                && uid.equals(current.getUniqueIdentifier())) {
+            int currentIdx = currentInst == null ? -1 : current.getInstances().indexOf(currentInst);
+            if (instanceIndex < 0 || instanceIndex == currentIdx) {
+                // Duplicate setChannel to the same DVB-I service must not reset
+                // mBlocked / cancel an in-progress PIN (ERRATA0120).
+                Log.i(TAG, "tune: already on " + uid + "; keep parental state");
+                return true;
+            }
+        }
         mTuneGeneration++;
         boolean blocked = mBlocked;
         mBlocked = false;
