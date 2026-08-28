@@ -127,6 +127,30 @@ public class TunedServiceManager {
     public synchronized ServiceInstance getTunedInstance() { return mTunedInstance; }
 
     /**
+     * O.5.4 / ERRATA0400: pin the currently selected instance without retuning.
+     * Live TV selection uses {@code instanceIndex=-1} (unpinned). {@code setChannel} to
+     * that instance's Channel must lock it so it stays selected after the
+     * availability window ends.
+     */
+    public void pinCurrentInstance() {
+        synchronized (mLock) {
+            if (mTunedInstance == null) {
+                Log.w(TAG, "pinCurrentInstance: no tuned instance");
+                return;
+            }
+            if (mTunedServiceRunnable != null) {
+                if (mTunedServiceRunnable.mTargetInstance == null) {
+                    mTunedServiceRunnable.mTargetInstance = mTunedInstance;
+                    mTunedServiceRunnable.mLastPinnedAvailable = true;
+                    Log.i(TAG, "Pinning currently selected instance (O.5.4 / ERRATA0400)");
+                }
+                return;
+            }
+            startTunedServiceThread(true);
+        }
+    }
+
+    /**
      * HbbTV O.3 / TS 103 770 §5.2.13: LA 1.2 could not be started, so this instance is discarded
      * for the current selection attempt and the next selectable instance is chosen.
      * No-op if the application has pinned an instance (O.5.4 / ERRATA0400).

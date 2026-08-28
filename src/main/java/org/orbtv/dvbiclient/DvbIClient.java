@@ -1028,11 +1028,16 @@ public class DvbIClient {
         ServiceInstance currentInst = mServiceManager.getTunedInstance();
         if (current != null && uid != null
                 && uid.equals(current.getUniqueIdentifier())) {
-            int currentIdx = currentInst == null ? -1 : current.getInstances().indexOf(currentInst);
-            if (instanceIndex < 0 || instanceIndex == currentIdx) {
-                // Duplicate setChannel to the same DVB-I service must not reset
+            if (instanceIndex < 0) {
+                // Duplicate setChannel to the same DVB-I *service* must not reset
                 // mBlocked / cancel an in-progress PIN (ERRATA0120).
                 Log.i(TAG, "tune: already on " + uid + "; keep parental state");
+                return true;
+            }
+            if (isAlreadySelectedInstance(current, currentInst, instanceIndex)) {
+                // O.5.4 / ERRATA0400: setChannel to the already-selected *instance*
+                // must pin it and complete CCS without tearing down DASH or PIN.
+                completeInstanceLockWithoutRetune(instanceIndex, uid);
                 return true;
             }
         }
@@ -1060,6 +1065,56 @@ public class DvbIClient {
         mBlocked = blocked;
         Log.i(TAG, "Failed to tune to service with UID: " + uid);
         return false;
+    }
+
+    private static boolean isAlreadySelectedInstance(Service current, ServiceInstance currentInst,
+            int instanceIndex) {
+        if (current == null || currentInst == null || instanceIndex < 0) {
+            return false;
+        }
+        List<ServiceInstance> instances = current.getInstances();
+        if (instances == null) {
+            return false;
+        }
+        if (instanceIndex == instances.indexOf(currentInst)) {
+            return true;
+        }
+        if (instanceIndex >= instances.size()) {
+            return false;
+        }
+        ServiceInstance requested = instances.get(instanceIndex);
+        if (requested == null) {
+            return false;
+        }
+        if (requested == currentInst) {
+            return true;
+        }
+        String requestedUri = requested.getUri();
+        String currentUri = currentInst.getUri();
+        return requestedUri != null && requestedUri.equals(currentUri);
+    }
+
+    /**
+     * Pin the current DVB-I instance and synthesise ServiceInstanceChanged plus PRESENTING
+     * so video/broadcast can leave CONNECTING. Must not call {@link TunedServiceManager#tune}
+     * (that tuneOff()s DASH) or {@link ITvInputCallback#clearParentalAccessOverride()}.
+     */
+    private void completeInstanceLockWithoutRetune(int instanceIndex, String uid) {
+        Log.i(TAG, "tune: already on instance " + instanceIndex + " of " + uid
+            + "; pin and complete setChannel (O.5.4 / ERRATA0400)");
+        mServiceManager.pinCurrentInstance();
+        final Triplet triplet = getHbbtvChannelStatusTriplet();
+        mDvbIView.getContext().getMainExecutor().execute(() -> {
+            for (HbbTVCallback handler : mHbbTVCallbacks) {
+                handler.onServiceInstanceChange(instanceIndex);
+            }
+            if (triplet != null) {
+                mLastState = PLAYER_STATUS_PLAYING;
+                dispatchPlayerStatusChangedEvent(
+                    triplet.getOrigNetId(), triplet.getTsId(), triplet.getServiceId(),
+                    PLAYER_STATUS_PLAYING);
+            }
+        });
     }
 
     public synchronized void tuneOff() {
