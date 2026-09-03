@@ -107,6 +107,11 @@ public class DvbIClient {
     private volatile boolean mPinnedInstanceOutsideWindow = false;
     /** App (LA 1.2 / A/V Control) holds AV decoders; native DASH/RF must wait (A.2.4.1). */
     private volatile boolean mPresentationSuspended = false;
+    /**
+     * Last {@link #tune(String, int)} instance index. {@code >= 0} is an O.5.4 instance
+     * lock (ERRATA0900 i2); {@code < 0} is unpinned service select (ERRATA0700/0800).
+     */
+    private volatile int mRequestedInstanceIndex = -1;
     private String mPendingDashUri;
     private final TunedServiceManager.Callback mServiceManagerCallback = new TunedServiceManager.Callback() {
         @Override
@@ -130,10 +135,27 @@ public class DvbIClient {
                     // polyfill may treat as CCS while this method is still running.
                     publishApplicationHowRelatedHref(service, toInstance, false);
                     String app_1_2 = channel.getLinkedAppUri(LINKED_APP_SCHEME_1_2);
-                    if (app_1_2 == null) {
-                        handleNativeOrLinkedApp1_1(channel, toInstance, service, uri);
-                    } else {
+                    String dashUri = resolveNativeDashUri(toInstance, uri);
+                    boolean instanceLock = mRequestedInstanceIndex >= 0;
+                    Log.i(TAG, "INSTANCE_ROUTE: nativeDash=" + (dashUri != null)
+                        + " delivery=" + toInstance.getDeliveryType()
+                        + " app12=" + (app_1_2 != null)
+                        + " instanceLock=" + instanceLock
+                        + " uri=" + dashUri);
+                    // Drop leftover PLAYING from the previous MPD before this instance
+                    // presents (ERRATA0900 step 5 false CCS while CONNECTING).
+                    mDvbIView.suppressVideoEvents();
+                    // Type 1.2 owns media (ERRATA0700/0800): tuneOff native DASH even
+                    // when the instance has a UriBasedLocation (same MPD the LA HTML5
+                    // plays). Native DASH + 1.2 HowRelated only when the app locked
+                    // the instance Channel (O.5.4 / ERRATA0900 i2).
+                    if (app_1_2 != null && (dashUri == null || !instanceLock)) {
                         handleLinkedApp1_2(channel, app_1_2, service);
+                    } else {
+                        if (dashUri != null) {
+                            uri = dashUri;
+                        }
+                        handleNativeOrLinkedApp1_1(channel, toInstance, service, uri);
                     }
 
                     final int index = service.getInstances().indexOf(toInstance);
@@ -309,8 +331,18 @@ public class DvbIClient {
             mOverrideRequestPending = false;
             // Do not clear a PIN override here: this service may still be over-threshold.
             // Override is cleared on channel change (tune) or when the rating drops.
-            launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1_1), LINKED_APP_SCHEME_1_1);
+            String app_1_1 = channel.getLinkedAppUri(LINKED_APP_SCHEME_1_1);
+            String app_1_2 = channel.getLinkedAppUri(LINKED_APP_SCHEME_1_2);
+            if (app_1_1 != null) {
+                launchApp(app_1_1, LINKED_APP_SCHEME_1_1);
+            } else if (app_1_2 != null) {
+                // Native DASH instance whose HowRelated is 1.2 (ERRATA0900).
+                launchApp(app_1_2, LINKED_APP_SCHEME_1_2);
+            }
             if ("dvb-dash".equals(toInstance.getDeliveryType())) {
+                // Player.stop is synchronous through decoder teardown. Tuner CLOSING
+                // may still run in the background; DASH does not need the frontend.
+                Log.i(TAG, "RF_TUNE_DEBUG: switching to DASH after tuneOffBroadcast");
                 mTvInputCallback.tuneOffBroadcast();
                 if (mPresentationSuspended) {
                     Log.i(TAG, "DECODER: deferring DASH until app releases decoders");
@@ -475,7 +507,8 @@ public class DvbIClient {
         private void launchApp(String appUrl, String scheme) {
             if (appUrl != null) {
                 Log.i(TAG, "Found Hbbtv App with scheme '" + scheme + "' from Related Materials (" + appUrl + ")");
-                new GetXmlAitTask().execute(new XmlAitAttributes(appUrl, scheme));
+                new GetXmlAitTask().execute(
+                    new XmlAitAttributes(appUrl, scheme, mTuneGeneration));
             }
         }
 
@@ -529,6 +562,29 @@ public class DvbIClient {
         } else {
             mDvbIView.getContext().getMainExecutor().execute(publish);
         }
+    }
+
+    /**
+     * Terminal-presented DASH MPD, or null for app-only 1.2 (ERRATA0700/0800).
+     * Key off dvb-dash + a usable location; do not require getUri() to already
+     * be a trimmed http(s) string (ERRATA0900 i2).
+     */
+    private static String resolveNativeDashUri(ServiceInstance instance, String uri) {
+        if (instance == null || !"dvb-dash".equals(instance.getDeliveryType())) {
+            return null;
+        }
+        String loc = uri != null ? uri.trim() : "";
+        if (loc.isEmpty() && instance.getUri() != null) {
+            loc = instance.getUri().trim();
+        }
+        if (loc.isEmpty()) {
+            return null;
+        }
+        if (loc.startsWith("http://") || loc.startsWith("https://")) {
+            return loc;
+        }
+        Log.w(TAG, "INSTANCE_ROUTE: dvb-dash location is not http(s): " + loc);
+        return loc.startsWith("http") ? loc : null;
     }
 
     /** Instance-level 1.1 / 1.2 only; does not fall back to service-level type 2. */
@@ -996,6 +1052,22 @@ public class DvbIClient {
         }
     }
 
+    /**
+     * O.3 restart cap after irrecoverable error. Select another instance if one
+     * exists; do not kill/tuneOff the only instance (ERRATA0800).
+     */
+    public void onLinkedAppRestartLimitReached() {
+        ServiceInstance current = mServiceManager.getTunedInstance();
+        Service service = mServiceManager.getTunedService();
+        if (current == null || service == null) {
+            Log.w(TAG, "LA12_RESTART: no tuned instance at restart limit");
+            return;
+        }
+        if (!mServiceManager.discardCurrentInstanceAndReselect()) {
+            Log.w(TAG, "LA12_RESTART: no other instance; keeping current (O.3)");
+        }
+    }
+
     /** Latest service-list row for the tuned service (ratings may have changed). */
     private Service tunedServiceFromDb() {
         Service s = mServiceManager.getTunedService();
@@ -1018,7 +1090,9 @@ public class DvbIClient {
             return false;
         }
         if (instanceIndex < 0) {
-            return true;
+            // Service-level setChannel that actually changes instance (ERRATA0900 unlock)
+            // must drop DASH tracks so RF getComponents is not leftover IP media.
+            return false;
         }
         return instanceIndex == current.getInstances().indexOf(currentInst);
     }
@@ -1029,12 +1103,17 @@ public class DvbIClient {
         if (current != null && uid != null
                 && uid.equals(current.getUniqueIdentifier())) {
             if (instanceIndex < 0) {
-                // Duplicate setChannel to the same DVB-I *service* must not reset
-                // mBlocked / cancel an in-progress PIN (ERRATA0120).
-                Log.i(TAG, "tune: already on " + uid + "; keep parental state");
-                return true;
-            }
-            if (isAlreadySelectedInstance(current, currentInst, instanceIndex)) {
+                // Duplicate setChannel to the DVB-I *service* Channel: keep PIN when
+                // the terminal would already choose this instance (ERRATA0120).
+                // If an O.5.4 pin is holding a lower-priority instance (DASH), unlock
+                // and select highest-priority available (RF) (ERRATA0900 step 9).
+                if (isCurrentHighestPriorityInstance(current, currentInst)) {
+                    Log.i(TAG, "tune: already on " + uid + "; keep parental state");
+                    return true;
+                }
+                Log.i(TAG, "tune: service Channel unlocks instance; selecting highest-priority "
+                    + "(O.5.4 / ERRATA0900) uid=" + uid);
+            } else if (isAlreadySelectedInstance(current, currentInst, instanceIndex)) {
                 // O.5.4 / ERRATA0400: setChannel to the already-selected *instance*
                 // must pin it and complete CCS without tearing down DASH or PIN.
                 completeInstanceLockWithoutRetune(instanceIndex, uid);
@@ -1053,6 +1132,8 @@ public class DvbIClient {
         invalidateErrorTimer();
         mLastState = null;
         boolean retainTracks = shouldRetainTracks(uid, instanceIndex);
+        int previousInstanceIndex = mRequestedInstanceIndex;
+        mRequestedInstanceIndex = instanceIndex;
         if (mServiceManager.tune(mDbHandler.getServiceForUID(uid), instanceIndex)) {
             if (!retainTracks) {
                 mTracks.clear();
@@ -1062,9 +1143,36 @@ public class DvbIClient {
             }
             return true;
         }
+        mRequestedInstanceIndex = previousInstanceIndex;
         mBlocked = blocked;
         Log.i(TAG, "Failed to tune to service with UID: " + uid);
         return false;
+    }
+
+    /**
+     * Unpinned service selection would keep this instance (ERRATA0120 no-op).
+     * False when a pin is holding DASH while RF is available (ERRATA0900 step 9).
+     */
+    private boolean isCurrentHighestPriorityInstance(Service current, ServiceInstance currentInst) {
+        ServiceInstance preferred = mServiceManager.getHighestPrioritySelectableInstance(current);
+        return sameServiceInstance(currentInst, preferred);
+    }
+
+    private static boolean sameServiceInstance(ServiceInstance a, ServiceInstance b) {
+        if (a == b) {
+            return true;
+        }
+        if (a == null || b == null) {
+            return false;
+        }
+        String uriA = a.getUri();
+        String uriB = b.getUri();
+        if (uriA != null && uriA.equals(uriB)) {
+            return true;
+        }
+        Triplet ta = a.getTriplet();
+        Triplet tb = b.getTriplet();
+        return ta != null && tb != null && ta.toString().equals(tb.toString());
     }
 
     private static boolean isAlreadySelectedInstance(Service current, ServiceInstance currentInst,
@@ -1100,10 +1208,11 @@ public class DvbIClient {
      * (that tuneOff()s DASH) or {@link ITvInputCallback#clearParentalAccessOverride()}.
      */
     private void completeInstanceLockWithoutRetune(int instanceIndex, String uid) {
-        Log.i(TAG, "tune: already on instance " + instanceIndex + " of " + uid
-            + "; pin and complete setChannel (O.5.4 / ERRATA0400)");
         mServiceManager.pinCurrentInstance();
-        final Triplet triplet = getHbbtvChannelStatusTriplet();
+        final Triplet triplet = getHbbtvChannelStatusTriplet(instanceIndex);
+        Log.i(TAG, "tune: already on instance " + instanceIndex + " of " + uid
+            + "; pin and complete setChannel (O.5.4 / ERRATA0400)"
+            + (triplet != null ? (" ccs=" + triplet) : ""));
         mDvbIView.getContext().getMainExecutor().execute(() -> {
             for (HbbTVCallback handler : mHbbTVCallbacks) {
                 handler.onServiceInstanceChange(instanceIndex);
@@ -1120,6 +1229,7 @@ public class DvbIClient {
     public synchronized void tuneOff() {
         mLastState = null;
         mPinnedInstanceOutsideWindow = false;
+        mRequestedInstanceIndex = -1;
         clearPendingNativePresentation();
         mServiceManager.tuneOff();
         mStreamEventsLookup.clear();
@@ -1470,7 +1580,8 @@ public class DvbIClient {
        if (programme != null) {
            String onDemandUrl = programme.getOnDemandURL();
            if (onDemandUrl != null && !onDemandUrl.isEmpty()) {
-               new GetXmlAitTask().execute(new XmlAitAttributes(onDemandUrl, LINKED_APP_SCHEME_1_1 + "?lloc=epg"));
+               new GetXmlAitTask().execute(new XmlAitAttributes(
+                   onDemandUrl, LINKED_APP_SCHEME_1_1 + "?lloc=epg", mTuneGeneration));
            }
        }
     }
@@ -1566,13 +1677,57 @@ public class DvbIClient {
     }
 
     /**
-     * Triplet for HbbTV channel-status / CCS. Always the DVB-I Channel identity the
-     * application selected (AdditionalServiceParameters / UniqueIdentifier), never the
-     * RF instance delivery triplet. Tuner lock still uses {@link ServiceInstance#getTriplet()}.
+     * Triplet for HbbTV channel-status / CCS for the DVB-I <em>service</em>
+     * (ERRATA0710 / ERRATA0720). Tuner lock still uses
+     * {@link ServiceInstance#getTriplet()}.
      */
     public Triplet getHbbtvChannelStatusTriplet() {
+        return getHbbtvChannelStatusTriplet(-1);
+    }
+
+    /**
+     * Triplet for HbbTV channel-status / CCS.
+     * <p>
+     * {@code instanceIndex < 0}: DVB-I Channel identity (ERRATA0710).
+     * RF instance lock ({@code instanceIndex >= 0}, non-DASH): RF delivery
+     * triplet so {@code setChannel} to that instance Channel can complete CCS
+     * (ERRATA0900). DASH instances keep the DVB-I Channel identity (ERRATA0400).
+     */
+    public Triplet getHbbtvChannelStatusTriplet(int instanceIndex) {
+        if (instanceIndex >= 0) {
+            ServiceInstance inst = instanceAt(instanceIndex);
+            if (inst != null && !"dvb-dash".equals(inst.getDeliveryType())
+                    && inst.getTriplet() != null) {
+                return inst.getTriplet();
+            }
+        }
         return hbbtvStatusTriplet(mServiceManager.getTunedService(),
             mServiceManager.getTunedChannel());
+    }
+
+    /**
+     * RF delivery triplet while a non-DASH instance is selected. Broadcast AIT
+     * {@code service_id} matches this, not the DVB-I Channel CCS identity.
+     *
+     * @return RF triplet, or null for DASH / no instance
+     */
+    public Triplet getBroadcastAitTriplet() {
+        ServiceInstance inst = mServiceManager.getTunedInstance();
+        if (inst == null || "dvb-dash".equals(inst.getDeliveryType())) {
+            return null;
+        }
+        return inst.getTriplet();
+    }
+
+    private ServiceInstance instanceAt(int instanceIndex) {
+        ServiceInstance tuned = mServiceManager.getTunedInstance();
+        Service service = mServiceManager.getTunedService();
+        if (service == null || service.getInstances() == null
+                || instanceIndex < 0 || instanceIndex >= service.getInstances().size()) {
+            return tuned;
+        }
+        ServiceInstance requested = service.getInstances().get(instanceIndex);
+        return requested != null ? requested : tuned;
     }
 
     private static Triplet hbbtvStatusTriplet(Service service, DvbIChannelAdapter channel) {
@@ -1752,6 +1907,13 @@ public class DvbIClient {
             if (result == null) {
                 return;
             }
+            // ERRATA0900: a previous instance's XML AIT must not land after setChannel
+            // to another instance (re-lock 1.2 → 1.1 applied scheme 1.2 and CCS).
+            if (result.generation != mTuneGeneration) {
+                Log.i(TAG, "Ignoring stale XML AIT scheme=" + result.scheme
+                    + " gen=" + result.generation + " current=" + mTuneGeneration);
+                return;
+            }
             if (result.xml == null || result.xml.isEmpty()) {
                 Log.e(TAG, "XML AIT fetch failed scheme=" + result.scheme + " url=" + result.url);
                 if (LINKED_APP_SCHEME_1_2.equals(result.scheme)) {
@@ -1778,10 +1940,12 @@ public class DvbIClient {
         public String xml;
         public String url;
         public String scheme;
+        public int generation;
 
-        public XmlAitAttributes(String url, String scheme) {
+        public XmlAitAttributes(String url, String scheme, int generation) {
             this.url = url;
             this.scheme = scheme;
+            this.generation = generation;
         }
     }
 

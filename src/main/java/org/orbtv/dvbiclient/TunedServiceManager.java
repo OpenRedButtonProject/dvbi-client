@@ -127,6 +127,15 @@ public class TunedServiceManager {
     public synchronized ServiceInstance getTunedInstance() { return mTunedInstance; }
 
     /**
+     * Highest-priority selectable instance, same rule as unpinned {@code tune(service, -1)}.
+     */
+    public ServiceInstance getHighestPrioritySelectableInstance(Service service) {
+        synchronized (mLock) {
+            return getMaxPriorityInstance(service != null ? service : mTunedService);
+        }
+    }
+
+    /**
      * O.5.4 / ERRATA0400: pin the currently selected instance without retuning.
      * Live TV selection uses {@code instanceIndex=-1} (unpinned). {@code setChannel} to
      * that instance's Channel must lock it so it stays selected after the

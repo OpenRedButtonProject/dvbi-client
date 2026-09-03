@@ -23,6 +23,8 @@ public class DvbIView extends WebView {
     private boolean mSubsEnabled = false;
     private Boolean mPageLoaded = false;
     private Boolean mIsSuspended = false;
+    /** Drop dash.js events from a previous MPD across instance switch (ERRATA0900). */
+    private volatile boolean mSuppressVideoEvents = false;
     private int mViewWidth = 0; // Await onLayoutChange to calculate View width
     private int mAppWidth = 1280; // Apps are 1280 by default
 
@@ -44,6 +46,10 @@ public class DvbIView extends WebView {
 
         @JavascriptInterface
         public void onVideoEvent(String eventName, String eventData) {
+            if (mSuppressVideoEvents) {
+                Log.i(TAG, "Suppressing stale video event " + eventName);
+                return;
+            }
             Log.d("JavaScriptInterface", "Video event: " + eventName + ", data: " + eventData);
             try {
                 JSONObject data = new JSONObject(eventData);
@@ -120,6 +126,7 @@ public class DvbIView extends WebView {
                         evaluateJavascript("orb_loadMedia('" + mLastUrl + "', " + mSubsEnabled + ")", null);
                         mPageLoaded = true;
                         applyVideoRectangleJs();
+                        mSuppressVideoEvents = false;
                     }
                 }
             }
@@ -150,22 +157,32 @@ public class DvbIView extends WebView {
         mJSCallbacks.remove(handler);
     }
 
+    public void suppressVideoEvents() {
+        mSuppressVideoEvents = true;
+    }
+
     public boolean tune(String url, boolean enableSubs) {
         Log.i(TAG, "Tuning to url " + url + "...");
         if (url != null && url.startsWith("http")) {
+            mSuppressVideoEvents = true;
             mLastUrl = url;
             mSubsEnabled = enableSubs;
             mContext.getMainExecutor().execute(() -> {
                 synchronized (mPageLoaded) {
-                    if (!DVBI_PAGE.equals(this.getUrl())) {
+                    // RF tuneOff + setPresentationSuspended(false) while on about:blank
+                    // skips onResume (mPageLoaded=false). A paused WebView will not load
+                    // dvbipage.html or fetch the MPD (ERRATA0900 RF→DASH).
+                    this.onResume();
+                    if (!mIsSuspended) {
+                        this.setVisibility(View.VISIBLE);
+                        this.clearFocus();
+                    }
+                    if (Boolean.TRUE.equals(mPageLoaded) && DVBI_PAGE.equals(this.getUrl())) {
+                        evaluateJavascript("orb_loadMedia('" + mLastUrl + "', " + enableSubs + ")", null);
+                        mSuppressVideoEvents = false;
+                    } else {
                         mPageLoaded = false;
                         this.loadUrl(DVBI_PAGE);
-                        if (!mIsSuspended) {
-                            this.setVisibility(View.VISIBLE);
-                            this.clearFocus();
-                        }
-                    } else if (mPageLoaded) {
-                        evaluateJavascript("orb_loadMedia('" + mLastUrl + "', " + enableSubs + ")", null);
                     }
                 }
             });
@@ -176,6 +193,7 @@ public class DvbIView extends WebView {
 
     public void tuneOff() {
         Log.i(TAG, "Tuning off...");
+        mSuppressVideoEvents = true;
         mContext.getMainExecutor().execute(() -> {
             synchronized (mPageLoaded) {
                 mPageLoaded = false;
@@ -235,10 +253,13 @@ public class DvbIView extends WebView {
                         this.setVisibility(View.INVISIBLE);
                         // TODO: we may need to consider an alternative solution, as this will pause the video
                         this.onPause();
-                    } else if (mPageLoaded) {
+                    } else {
+                        // Resume even when the page is blank so a later DASH tune can load.
                         this.onResume();
-                        this.setVisibility(View.VISIBLE);
-                        this.clearFocus();
+                        if (Boolean.TRUE.equals(mPageLoaded)) {
+                            this.setVisibility(View.VISIBLE);
+                            this.clearFocus();
+                        }
                     }
                 });
             }
