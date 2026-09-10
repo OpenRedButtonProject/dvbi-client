@@ -78,7 +78,15 @@ public class DvbIClient {
     public static final String LINKED_APP_SCHEME_1_1 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:1.1";
     public static final String LINKED_APP_SCHEME_1_2 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:1.2";
     public static final String LINKED_APP_SCHEME_2 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:2";
+    public static final String LINKED_APP_SCHEME_4_1 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:4.1";
+    public static final String LINKED_APP_SCHEME_4_2 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:4.2";
+    public static final String LINKED_APP_SCHEME_4_3 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:4.3";
     public static final String LINKED_APP_SCHEME_1000_1 = "urn:dvb:metadata:cs:HowRelatedCS:2020:1000.1";
+
+    public static final String LA_SL_INSTALL_SUCCESS = "org.dvb.la.sl_install_success";
+    public static final String LA_SL_INSTALL_FAILURE = "org.dvb.la.sl_install_failure";
+    public static final String LA_CONSENT_WITHDRAWN = "org.dvb.la.consent_withdrawn";
+    public static final String LA_CONSENT_UNCHANGED = "org.dvb.la.consent_unchanged";
 
     private static final Map<String, Integer> HBBTV_CHANNEL_STATUS_LOOKUP = new HashMap<String, Integer>() {{
         // key names according to the events received from Javascript interface in DvbIView,
@@ -119,6 +127,8 @@ public class DvbIClient {
     private boolean mOverrideRequestPending = false;
     private String mPendingLinkedAppUrl;
     private String mPendingLinkedAppScheme;
+    private volatile String mLastLinkedAppMethod;
+    private volatile String mLastLinkedAppParamsJson;
     /** App-pinned instance is outside its Availability Period; ignore DASH PLAYING until it returns. */
     private volatile boolean mPinnedInstanceOutsideWindow = false;
     /** App (LA 1.2 / A/V Control) holds AV decoders; native DASH/RF must wait (A.2.4.1). */
@@ -2032,6 +2042,24 @@ public class DvbIClient {
         public boolean isActive() { return active; }
         public boolean isHidden() { return hidden; }
         public String getLabel() { return label; }
+    }
+
+    /**
+     * TS 103 770 §5.2.3.7 completion from a type 4.x linked application.
+     * Phase 1 stores the last message; the SL-install gate (Phase 2) will act on it.
+     */
+    public void handleLinkedAppJsonRpc(String method, String paramsJson) {
+        Log.i(TAG, "linked-app JSON-RPC method=" + method + " params=" + paramsJson);
+        mLastLinkedAppMethod = method;
+        mLastLinkedAppParamsJson = paramsJson != null ? paramsJson : "{}";
+    }
+
+    public String getLastLinkedAppMethod() {
+        return mLastLinkedAppMethod;
+    }
+
+    public String getLastLinkedAppParamsJson() {
+        return mLastLinkedAppParamsJson;
     }
 
     public static class Callback {
