@@ -38,12 +38,14 @@ public class TunedServiceManager {
     private Thread mTunedServiceThread = null;
     private Service mTunedService = null;
     private ServiceInstance mTunedInstance = null;
+    private EpgManager mEpgManager;
     private DatabaseHandler mDbHandler;
     private List<Programme> mNowNextProgrammes = new ArrayList<>();
     private final Set<ServiceInstance> mDiscardedInstances = new HashSet<>();
     private final Object mLock = new Object();
 
     public TunedServiceManager(EpgManager epgManager, DatabaseHandler dbHandler) {
+        mEpgManager = epgManager;
         mDbHandler = dbHandler;
         epgManager.registerCallback(serviceUIDs -> {
             synchronized (mLock) {
@@ -75,6 +77,7 @@ public class TunedServiceManager {
             return false;
         }
         Log.i(TAG, "---------- Tuning to service ----------\n" + service + "\n------------------------------------");
+        mEpgManager.fetchAndStoreSchedule(service);
         synchronized (mLock) {
             mTunedService = service;
             updateNowNextProgrammes();

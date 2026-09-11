@@ -44,6 +44,8 @@ import java.util.List;
 public class EpgManager {
     private static final String TAG = EpgManager.class.getSimpleName();
     private static final long SECONDS_OF_DAY = 86400;
+    private static final long EPG_INTERVAL = 10800;
+    private static final int CGS_HTTP_TIMEOUT_MS = 5000;
     private final DatabaseHandler mDbHandler;
     private final Object mLock = new Object();
     private final EpgRunnable mEpgRunnable;
@@ -61,6 +63,60 @@ public class EpgManager {
 
     public void refreshServiceLists() {
         mEpgRunnable.refreshServiceLists();
+    }
+
+    /**
+     * Fetch this service's CGS schedule now and replace stored programmes.
+     * Tune-time parental checks must not use a ladder from a previous origin
+     * (ERRATA0310 {@code status.php?reset=1}).
+     *
+     * @return true if a CGS endpoint was contacted
+     */
+    public boolean fetchAndStoreSchedule(Service service) {
+        EpgTaskInfo info = scheduleTaskInfoFor(service);
+        if (info == null) {
+            return false;
+        }
+        info.isNowNext = false;
+        Log.i(TAG, "Fetching CGS schedule on tune for " + info.getServiceUID()
+            + " uri=" + info.getmEndPointUri());
+        ArrayList<Programme> programmes = downloadProgrammes(info);
+        if (programmes == null) {
+            Log.w(TAG, "CGS schedule fetch failed for " + info.getServiceUID()
+                + "; using stored EPG");
+            return false;
+        }
+        mDbHandler.updateProgrammesForService(info.getServiceUID(), programmes);
+        Log.i(TAG, "CGS schedule stored for " + info.getServiceUID()
+            + ", programmeCount=" + programmes.size());
+        return true;
+    }
+
+    private EpgTaskInfo scheduleTaskInfoFor(Service service) {
+        if (service == null) {
+            return null;
+        }
+        ContentGuide guide = service.getContentGuide();
+        if (guide == null || guide.getScheduleInfoEndpointURI() == null
+                || guide.getScheduleInfoEndpointURI().isEmpty()) {
+            return null;
+        }
+        String uid = service.getUniqueIdentifier();
+        String serviceRef = service.getContentGuideServiceRef();
+        if (serviceRef == null || serviceRef.isEmpty()) {
+            serviceRef = uid;
+        }
+        if (uid == null || uid.isEmpty() || serviceRef.isEmpty()) {
+            return null;
+        }
+        Uri.Builder builder = Uri.parse(guide.getScheduleInfoEndpointURI()).buildUpon();
+        builder.appendQueryParameter("sid", serviceRef);
+        Uri programUri = null;
+        String programInfo = guide.getProgramInfoEndpointURI();
+        if (programInfo != null && !programInfo.isEmpty()) {
+            programUri = Uri.parse(programInfo);
+        }
+        return new EpgTaskInfo(uid, builder.build(), programUri);
     }
 
     public void requestUpdateFromEventStream(Service service, JSONObject data) {
@@ -265,6 +321,142 @@ public class EpgManager {
         }
     }
 
+    private XmlNode fetchDataFromUri(URL url) throws IOException {
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        try {
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("Content-Type", "application/xml");
+            connection.setUseCaches(false);
+            connection.setConnectTimeout(CGS_HTTP_TIMEOUT_MS);
+            connection.setReadTimeout(CGS_HTTP_TIMEOUT_MS);
+            InputStream inputStream = connection.getInputStream();
+            BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
+            StringBuilder responseBuilder = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                responseBuilder.append(line);
+            }
+            reader.close();
+            return XmlNode.parse(responseBuilder.toString());
+        } catch (java.io.FileNotFoundException e) {
+            Log.d(TAG, "EPG data not available: " + url.toString());
+        } catch (Exception e) {
+            Log.e(TAG, "error", e);
+        } finally {
+            connection.disconnect();
+        }
+        return null;
+    }
+
+    private ArrayList<Programme> downloadProgrammes(EpgTaskInfo info) {
+        synchronized (info) {
+            try {
+                Uri.Builder uBuilder = info.getmEndPointUri().buildUpon();
+                if (info.isNowNext) {
+                    uBuilder.appendQueryParameter("now_next", "true");
+                } else {
+                    long currentTimestamp = System.currentTimeMillis() / 1000;
+                    long startTime = (currentTimestamp - EPG_INTERVAL) - currentTimestamp % EPG_INTERVAL;
+                    long endTime = (currentTimestamp + EPG_INTERVAL * 7) - currentTimestamp % EPG_INTERVAL;
+                    uBuilder.appendQueryParameter("start", String.valueOf(startTime));
+                    uBuilder.appendQueryParameter("end", String.valueOf(endTime));
+                }
+
+                XmlNode epgMetadata = fetchDataFromUri(new URL(uBuilder.build().toString()));
+                if ((epgMetadata == null || epgMetadata.getChildrenCount() == 0)
+                        && !info.triedAlternateQuery) {
+                    info.triedAlternateQuery = true;
+                    info.isNowNext = !info.isNowNext;
+                    return downloadProgrammes(info);
+                }
+                info.triedAlternateQuery = false;
+                return parseProgrammes(epgMetadata, info);
+            } catch (IOException e) {
+                Log.e(TAG, "IOException", e);
+            } catch (Exception e) {
+                Log.e(TAG, "Parsing error", e);
+            }
+            return null;
+        }
+    }
+
+    private ArrayList<Programme> parseProgrammes(XmlNode epgMetadata, EpgTaskInfo info) {
+        ArrayList<Programme> programmes = new ArrayList<>();
+        if (epgMetadata == null) {
+            return programmes;
+        }
+        List<XmlNode> scheduleEvents = epgMetadata.getDescendantsByName("ScheduleEvent");
+        List<XmlNode> programmesInfo = epgMetadata.getDescendantsByName("ProgramInformation");
+        Uri auxEndPointUri = info.getmAuxEndPointUri();
+        Service service = mDbHandler.getServiceForUID(info.getServiceUID());
+
+        if (!scheduleEvents.isEmpty()) {
+            for (XmlNode event : scheduleEvents) {
+                Programme.Builder pBuilder = new Programme.Builder();
+                XmlNode programNode = event.getDescendantByName("Program");
+                String programId = null;
+                if (programNode != null) {
+                    programId = programNode.getAttribute("crid");
+                    if (programId == null) {
+                        programId = programNode.getAttribute("programId");
+                    }
+                }
+                findStartEndTimes(event, pBuilder, System.currentTimeMillis() / 1000, SECONDS_OF_DAY);
+
+                XmlNode programInfo = null;
+                if (programId != null) {
+                    for (XmlNode pi : programmesInfo) {
+                        if (programId.equals(pi.getAttribute("programId"))
+                                || programId.equals(pi.getAttribute("crid"))) {
+                            programInfo = pi;
+                            break;
+                        }
+                    }
+                }
+                if (programInfo != null) {
+                    if (auxEndPointUri != null && !auxEndPointUri.toString().isEmpty()) {
+                        try {
+                            Uri.Builder auxBuilder = auxEndPointUri.buildUpon();
+                            auxBuilder.appendQueryParameter("pid", programId);
+                            XmlNode epgProgramInfoMetadata =
+                                    fetchDataFromUri(new URL(auxBuilder.build().toString()));
+                            if (epgProgramInfoMetadata != null) {
+                                findOnDemandProgram(epgProgramInfoMetadata, event, programId, pBuilder);
+                            }
+                        } catch (IOException e) {
+                            Log.e(TAG, "IOException", e);
+                        }
+                    }
+                    findDescriptions(programInfo, pBuilder);
+                    if (!findParentalGuidance(programInfo, pBuilder)) {
+                        applyServiceParentalFallback(pBuilder, service);
+                    }
+                    findTitle(programInfo, pBuilder);
+                } else {
+                    applyServiceParentalFallback(pBuilder, service);
+                }
+                programmes.add(pBuilder
+                        .setProgramId(programId)
+                        .build());
+            }
+        } else {
+            for (XmlNode programInfo : programmesInfo) {
+                Programme.Builder pBuilder = new Programme.Builder();
+                String programId = programInfo.getAttribute("programId");
+                findStartEndTimes(programInfo, pBuilder, System.currentTimeMillis() / 1000, SECONDS_OF_DAY);
+                findDescriptions(programInfo, pBuilder);
+                if (!findParentalGuidance(programInfo, pBuilder)) {
+                    applyServiceParentalFallback(pBuilder, service);
+                }
+                findTitle(programInfo, pBuilder);
+                programmes.add(pBuilder
+                        .setProgramId(programId)
+                        .build());
+            }
+        }
+        return programmes;
+    }
+
     private class EpgRunnable implements Runnable {
         private final ArrayList<EpgTaskInfo> mScheduleInfos = new ArrayList<>();
 
@@ -336,158 +528,25 @@ public class EpgManager {
     }
 
     private class EpgMetadataTask extends AsyncUtils<ArrayList<Programme>, Void> {
-        private static final long EPG_INTERVAL = 10800;
         private final EpgTaskInfo mTaskInfo;
 
         public EpgMetadataTask(EpgTaskInfo taskInfo) {
             mTaskInfo = taskInfo;
         }
 
-        private XmlNode fetchDataFromUri(URL url) throws IOException {
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-            boolean useHttps = false;
-            try {
-//                if (useHttps) {
-//                    // Configure the SSL context for HTTPS connections
-//                    SSLContext sslContext = SSLContext.getInstance("TLS");
-//                    sslContext.init(null, new TrustManager[]{new TrustAllManager()}, null);
-//                    ((HttpsURLConnection) connection).setSSLSocketFactory(sslContext.getSocketFactory());
-//                    ((HttpsURLConnection) connection).setHostnameVerifier((hostname, session) -> true);
-//                }
-                connection.setRequestMethod("GET");
-                connection.setRequestProperty("Content-Type", "application/xml");
-                InputStream inputStream = connection.getInputStream();
-                BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
-                StringBuilder responseBuilder = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    responseBuilder.append(line);
-                }
-                reader.close();
-
-                //Log.d(TAG, "fetchDataFromUri response: " + responseBuilder.toString());
-                return XmlNode.parse(responseBuilder.toString());
-            } catch (java.io.FileNotFoundException e) {
-                    // FileNotFoundException is expected when EPG URLs are not available
-                    Log.d(TAG, "EPG data not available: " + url.toString());
-            } catch (Exception e) {
-                    Log.e(TAG, "error", e);
-            } finally {
-                connection.disconnect();
-            }
-            return null;
-        }
-
         @Override
         protected ArrayList<Programme> doInBackground(Void... ignore) {
-            synchronized (mTaskInfo) {
-                try {
-                    //Log.d(TAG, "Request EPG Metadata for: " + mTaskInfo.getServiceUID());
-                    Uri.Builder uBuilder = mTaskInfo.getmEndPointUri().buildUpon();
-                    if (mTaskInfo.isNowNext) {
-                        uBuilder.appendQueryParameter("now_next", "true");
-                    } else {
-                        long currentTimestamp = System.currentTimeMillis() / 1000;
-                        long startTime = (currentTimestamp - EPG_INTERVAL) - currentTimestamp % EPG_INTERVAL;
-                        long endTime = (currentTimestamp + EPG_INTERVAL * 7) - currentTimestamp % EPG_INTERVAL;
-                        uBuilder.appendQueryParameter("start", String.valueOf(startTime));
-                        uBuilder.appendQueryParameter("end", String.valueOf(endTime));
-                    }
-
-                    XmlNode epgMetadata = fetchDataFromUri(new URL(uBuilder.build().toString()));
-                    XmlNode epgProgramInfoMetadata = null;
-
-                    if ((epgMetadata == null || epgMetadata.getChildrenCount() == 0)
-                            && !mTaskInfo.triedAlternateQuery) {
-                        mTaskInfo.triedAlternateQuery = true;
-                        mTaskInfo.isNowNext = !mTaskInfo.isNowNext;
-                        return doInBackground();
-                    }
-                    mTaskInfo.triedAlternateQuery = false;
-                    mTaskInfo.isNowNext = true;
-
+            ArrayList<Programme> programmes = downloadProgrammes(mTaskInfo);
+            if (programmes != null) {
+                synchronized (mTaskInfo) {
                     if (mTaskInfo.nextUpdate == null) {
-                        // TODO: update request time
-                        // mTimestamp.set(connection.getHeaderField("Cache-Control"));
                         mTaskInfo.nextUpdate = System.currentTimeMillis() / 1000 + 300;
                     }
-
-                    ArrayList<Programme> programmes = new ArrayList<>();
-                    if (epgMetadata != null) {
-                        List<XmlNode> scheduleEvents = epgMetadata.getDescendantsByName("ScheduleEvent");
-                        List<XmlNode> programmesInfo = epgMetadata.getDescendantsByName("ProgramInformation");
-                        Uri auxEndPointUri = mTaskInfo.getmAuxEndPointUri();
-                        mUpdatedServices.add(mTaskInfo.getServiceUID());
-                        Service service = mDbHandler.getServiceForUID(mTaskInfo.getServiceUID());
-
-                        if (!scheduleEvents.isEmpty()) {
-                            for (XmlNode event : scheduleEvents) {
-                                Programme.Builder pBuilder = new Programme.Builder();
-                                XmlNode programNode = event.getDescendantByName("Program");
-                                String programId = null;
-                                if (programNode != null) {
-                                    programId = programNode.getAttribute("crid");
-                                    if (programId == null) {
-                                        programId = programNode.getAttribute("programId");
-                                    }
-                                }
-                                findStartEndTimes(event, pBuilder, System.currentTimeMillis() / 1000, SECONDS_OF_DAY);
-
-                                XmlNode info = null;
-                                if (programId != null) {
-                                    for (XmlNode pi : programmesInfo) {
-                                        if (programId.equals(pi.getAttribute("programId"))
-                                                || programId.equals(pi.getAttribute("crid"))) {
-                                            info = pi;
-                                            break;
-                                        }
-                                    }
-                                }
-                                if (info != null) {
-                                    if (auxEndPointUri != null && !auxEndPointUri.toString().isEmpty()) {
-                                        Uri.Builder auxBuilder = auxEndPointUri.buildUpon();
-                                        auxBuilder.appendQueryParameter("pid", programId);
-                                        epgProgramInfoMetadata = fetchDataFromUri(new URL(auxBuilder.build().toString()));
-                                        if (epgProgramInfoMetadata != null) {
-                                            findOnDemandProgram(epgProgramInfoMetadata, event, programId, pBuilder);
-                                        }
-                                    }
-                                    findDescriptions(info, pBuilder);
-                                    if (!findParentalGuidance(info, pBuilder)) {
-                                        applyServiceParentalFallback(pBuilder, service);
-                                    }
-                                    findTitle(info, pBuilder);
-                                } else {
-                                    applyServiceParentalFallback(pBuilder, service);
-                                }
-                                programmes.add(pBuilder
-                                        .setProgramId(programId)
-                                        .build());
-                            }
-                        } else {
-                            for (XmlNode info : programmesInfo) {
-                                Programme.Builder pBuilder = new Programme.Builder();
-                                String programId = info.getAttribute("programId");
-                                findStartEndTimes(info, pBuilder, System.currentTimeMillis() / 1000, SECONDS_OF_DAY);
-                                findDescriptions(info, pBuilder);
-                                if (!findParentalGuidance(info, pBuilder)) {
-                                    applyServiceParentalFallback(pBuilder, service);
-                                }
-                                findTitle(info, pBuilder);
-                                programmes.add(pBuilder
-                                        .setProgramId(programId)
-                                        .build());
-                            }
-                        }
-                    }
-                    return programmes;
-                } catch (IOException e) {
-                    Log.e(TAG, "IOException", e);
-                } catch (Exception e) {
-                    Log.e(TAG, "Parsing error", e);
+                    mTaskInfo.isNowNext = true;
                 }
+                mUpdatedServices.add(mTaskInfo.getServiceUID());
             }
-            return null;
+            return programmes;
         }
 
         @Override

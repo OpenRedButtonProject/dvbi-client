@@ -468,6 +468,10 @@ public class DvbIClient {
         }
 
         private void requestOverrideIfNeeded() {
+            if (mServiceManager.getTunedService() == null) {
+                Log.i(TAG, "PARENTAL_RATING: skip PIN; no longer tuned");
+                return;
+            }
             if (mOverrideRequestPending) {
                 return;
             }
@@ -1243,10 +1247,17 @@ public class DvbIClient {
     }
 
     public synchronized void tuneOff() {
+        Log.i(TAG, "tuneOff: drop DVB-I selection (gen " + mTuneGeneration + " -> "
+            + (mTuneGeneration + 1) + ")");
+        mTuneGeneration++;
+        mBlocked = false;
+        mOverrideRequestPending = false;
         mLastState = null;
         mPinnedInstanceOutsideWindow = false;
         mRequestedInstanceIndex = -1;
         clearPendingNativePresentation();
+        mPendingLinkedAppUrl = null;
+        mPendingLinkedAppScheme = null;
         mServiceManager.tuneOff();
         mStreamEventsLookup.clear();
         mTracks.clear();
