@@ -87,6 +87,8 @@ public class DvbIClient {
     public static final String LA_SL_INSTALL_FAILURE = "org.dvb.la.sl_install_failure";
     public static final String LA_CONSENT_WITHDRAWN = "org.dvb.la.consent_withdrawn";
     public static final String LA_CONSENT_UNCHANGED = "org.dvb.la.consent_unchanged";
+    public static final String LA_RENEW_SUCCESS = "org.dvb.la.renew_success";
+    public static final String LA_RENEW_FAILURE = "org.dvb.la.renew_failure";
 
     private static final Map<String, Integer> HBBTV_CHANNEL_STATUS_LOOKUP = new HashMap<String, Integer>() {{
         // key names according to the events received from Javascript interface in DvbIView,
@@ -127,8 +129,8 @@ public class DvbIClient {
     private boolean mOverrideRequestPending = false;
     private String mPendingLinkedAppUrl;
     private String mPendingLinkedAppScheme;
-    private volatile String mLastLinkedAppMethod;
-    private volatile String mLastLinkedAppParamsJson;
+    private volatile LinkedAppCompletion mLastLinkedAppCompletion;
+    private volatile LinkedAppJsonRpcListener mLinkedAppJsonRpcListener;
     /** App-pinned instance is outside its Availability Period; ignore DASH PLAYING until it returns. */
     private volatile boolean mPinnedInstanceOutsideWindow = false;
     /** App (LA 1.2 / A/V Control) holds AV decoders; native DASH/RF must wait (A.2.4.1). */
@@ -2045,21 +2047,53 @@ public class DvbIClient {
     }
 
     /**
-     * TS 103 770 §5.2.3.7 completion from a type 4.x linked application.
-     * Phase 1 stores the last message; the SL-install gate (Phase 2) will act on it.
+     * Atomic snapshot of a type 4.x JSON-RPC completion (method + params together).
+     */
+    public static final class LinkedAppCompletion {
+        public final String method;
+        public final String paramsJson;
+
+        public LinkedAppCompletion(String method, String paramsJson) {
+            this.method = method;
+            this.paramsJson = paramsJson != null ? paramsJson : "{}";
+        }
+    }
+
+    public interface LinkedAppJsonRpcListener {
+        void onLinkedAppJsonRpc(String method, String paramsJson);
+    }
+
+    /**
+     * TS 103 770 §5.2.3.7 / §5.2.3.8 completion from a type 4.x linked application.
+     * Called from tvinput OrbProvider.OrbSessionCallback.onLinkedAppJsonRpc.
+     * paramsJson may include installationtoken — do not log it.
      */
     public void handleLinkedAppJsonRpc(String method, String paramsJson) {
-        Log.i(TAG, "linked-app JSON-RPC method=" + method + " params=" + paramsJson);
-        mLastLinkedAppMethod = method;
-        mLastLinkedAppParamsJson = paramsJson != null ? paramsJson : "{}";
+        Log.i(TAG, "linked-app JSON-RPC method=" + method);
+        LinkedAppCompletion completion = new LinkedAppCompletion(method, paramsJson);
+        mLastLinkedAppCompletion = completion;
+        LinkedAppJsonRpcListener listener = mLinkedAppJsonRpcListener;
+        if (listener != null) {
+            listener.onLinkedAppJsonRpc(completion.method, completion.paramsJson);
+        }
+    }
+
+    public void setLinkedAppJsonRpcListener(LinkedAppJsonRpcListener listener) {
+        mLinkedAppJsonRpcListener = listener;
+    }
+
+    public LinkedAppCompletion getLastLinkedAppCompletion() {
+        return mLastLinkedAppCompletion;
     }
 
     public String getLastLinkedAppMethod() {
-        return mLastLinkedAppMethod;
+        LinkedAppCompletion last = mLastLinkedAppCompletion;
+        return last != null ? last.method : null;
     }
 
     public String getLastLinkedAppParamsJson() {
-        return mLastLinkedAppParamsJson;
+        LinkedAppCompletion last = mLastLinkedAppCompletion;
+        return last != null ? last.paramsJson : null;
     }
 
     public static class Callback {
