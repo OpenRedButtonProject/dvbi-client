@@ -33,6 +33,7 @@ public class ServiceList {
     private List<Service> mServices = new ArrayList<>();
     private List<LCNTable> mLCNTables = new ArrayList<>();
     private List<ContentGuide> mContentGuideSources = new ArrayList<>();
+    private List<RelatedMaterial> mRelatedMaterials = new ArrayList<>();
     //rest of the members
 
     private ServiceList() {
@@ -55,6 +56,8 @@ public class ServiceList {
     }
 
     public List<ContentGuide> getContentGuideSources() { return new ArrayList<>(mContentGuideSources); }
+
+    public List<RelatedMaterial> getRelatedMaterials() { return mRelatedMaterials; }
 
     private int getNextAvailableLcn() {
         int lcn = 0;
@@ -124,6 +127,8 @@ public class ServiceList {
                     boolean visible = Boolean.parseBoolean(xpp.getAttributeValue(null, "visible"));
                     LCNTable.LCNEntry lcnEntry = new LCNTable.LCNEntry(channelNumber, serviceRef, selectable, visible);
                     currentLCNTable.lcnEntries.add(lcnEntry);
+                } else if ("RelatedMaterial".equals(xpp.getName())) {
+                    serviceList.mRelatedMaterials.add(RelatedMaterial.parseFromXML(xpp));
                 } else if ("ContentGuideSource".equals(xpp.getName()) || "ContentGuideSourceList".equals(xpp.getName())) {
                     serviceList.mContentGuideSources = ContentGuide.parseSourceFromXML(xpp);
                 } else if ("Service".equals(xpp.getName())) {
@@ -196,6 +201,7 @@ public class ServiceList {
             instance.mServices = mInstance.mServices; // for now, no need to copy the array as it will allocate twice as many services for no reason
             instance.mLCNTables = mInstance.mLCNTables;
             instance.mContentGuideSources = mInstance.mContentGuideSources;
+            instance.mRelatedMaterials = mInstance.mRelatedMaterials;
             return instance;
         }
     }
