@@ -146,6 +146,7 @@ public class DvbIClient {
     private volatile LinkedAppCompletion mLastLinkedAppCompletion;
     private volatile LinkedAppJsonRpcListener mLinkedAppJsonRpcListener;
     private volatile boolean mInstallGateActive = false;
+    private int mDiscoveryEpoch;
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     private final Runnable mInstallGateTimeout = this::onType41InstallTimeout;
     private ServiceList mPendingServiceList;
@@ -1002,6 +1003,32 @@ public class DvbIClient {
         mCallbacks.remove(handler);
     }
 
+    /** True if a live-TV OrbProvider (or other host) is already registered for linked-app launch. */
+    public synchronized boolean hasLinkedAppCallback() {
+        return !mCallbacks.isEmpty();
+    }
+
+    public boolean isType41InstallGateActive() {
+        return mInstallGateActive;
+    }
+
+    /**
+     * Abort discovery and a type 4.1 install gate without scan-complete. Used when Setup
+     * Finish / destroy must not wait for the 60s timeout or sync a list about to be discarded.
+     */
+    public void cancelServiceSearch() {
+        mDiscoveryEpoch++;
+        if (mInstallGateActive) {
+            Log.w(TAG, "Cancelling type 4.1 install gate (Setup aborted search)");
+            cancelType41InstallGate();
+        }
+        ServiceListDiscoveryTask previous = mLastDiscoveryTask;
+        mLastDiscoveryTask = null;
+        if (previous != null) {
+            previous.cancel(true);
+        }
+    }
+
     public synchronized boolean subscribeStreamEvent(int listenId, String targetUrl, String eventName) {
         Log.i(TAG, "Subscribe Stream event with targetUrl '" + targetUrl + "' and eventName '" + eventName + "'.");
         if (targetUrl != null) {
@@ -1484,12 +1511,13 @@ public class DvbIClient {
     }
 
     public boolean startServiceSearch(String serviceListURL) {
+        mDiscoveryEpoch++;
         if (mInstallGateActive) {
             Log.w(TAG, "Cancelling in-progress type 4.1 install gate to start a new search");
             cancelType41InstallGate();
         }
         ServiceListDiscoveryTask previous = mLastDiscoveryTask;
-        mLastDiscoveryTask = new ServiceListDiscoveryTask();
+        mLastDiscoveryTask = new ServiceListDiscoveryTask(mDiscoveryEpoch);
         if (previous != null) {
             previous.cancel(true);
         }
@@ -1857,6 +1885,12 @@ public class DvbIClient {
     }
 
     private class ServiceListDiscoveryTask extends AsyncUtils<Void, String> {
+        private final int mEpoch;
+
+        ServiceListDiscoveryTask(int epoch) {
+            mEpoch = epoch;
+        }
+
         @Override
         protected Void doInBackground(String... uris) {
             mPendingServiceList = null;
@@ -1921,6 +1955,10 @@ public class DvbIClient {
 
         @Override
         public void onPostExecute(Void success) {
+            if (mEpoch != mDiscoveryEpoch) {
+                discardPendingServiceList();
+                return;
+            }
             RelatedMaterial type41 = findType41App(mPendingServiceList);
             if (type41 != null && hasCompletedType41Install(mPendingServiceList)) {
                 Log.i(TAG, "Type 4.1 already completed for list UID "
@@ -2192,7 +2230,7 @@ public class DvbIClient {
      * Drop a hung or superseded 4.1 gate without emitting scan-complete. The caller is
      * starting a replacement search whose finalizeSearch() will notify Setup.
      */
-    private void cancelType41InstallGate() {
+    public void cancelType41InstallGate() {
         mMainHandler.removeCallbacks(mInstallGateTimeout);
         mInstallGateActive = false;
         setLinkedAppJsonRpcListener(null);
