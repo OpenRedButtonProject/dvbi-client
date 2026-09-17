@@ -939,6 +939,12 @@ public class DvbIClient {
         mDbHandler = new DatabaseHandler(context);
         mDvbIView = new DvbIView(context);
         mDvbIView.addJSCallback(mJSCallback);
+        mDvbIView.setDashTuneListener(tuned -> {
+            if (mTvInputCallback != null) {
+                // Compositing hint (hide empty DTVKit plane), not a presenting-frames signal.
+                mTvInputCallback.onNativeDashPresenting(tuned);
+            }
+        });
         mEpgManager = new EpgManager(mDbHandler);
         mEpgManager.registerCallback(serviceUIDs -> {
             long startMs = System.currentTimeMillis();
@@ -1366,6 +1372,12 @@ public class DvbIClient {
         mSelectedTracks.clear();
         mIsUnselected.clear();
         mDvbIView.tuneOff();
+    }
+
+    /** Type 1.1 native DASH is selected in {@link DvbIView} for compositing (not type 1.2 HTML5).
+     * True hides the empty DTVKit plane; it is not a decoded-frame guarantee. */
+    public boolean isNativeDashTuned() {
+        return mDvbIView != null && mDvbIView.isDashTuned();
     }
 
     public void setPresentationSuspended(boolean suspend) {

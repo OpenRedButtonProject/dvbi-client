@@ -41,6 +41,12 @@ public class ITvInputCallback {
 
     public boolean tuneBroadcast(String uri) { return false; }
     public void tuneOffBroadcast() { }
+    /**
+     * Type 1.1 native DASH is selected in DvbIView. {@code presenting=true} on tune is early
+     * enough to hide the empty DTVKit plane; it is not a decoded-frame guarantee. False on
+     * every abort (tuneOff, failed load, type 1.2 taking the AV decoders).
+     */
+    public void onNativeDashPresenting(boolean presenting) { }
     public void notifyVideoAvailable() { }
     public void notifyVideoUnavailable(int reason) { }
     public void updateEventPeriods() { }
