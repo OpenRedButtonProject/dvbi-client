@@ -147,6 +147,7 @@ public class DvbIClient {
     private volatile LinkedAppJsonRpcListener mLinkedAppJsonRpcListener;
     private volatile boolean mInstallGateActive = false;
     private int mDiscoveryEpoch;
+    private GetXmlAitTask mType41AitTask;
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     private final Runnable mInstallGateTimeout = this::onType41InstallTimeout;
     private ServiceList mPendingServiceList;
@@ -1003,9 +1004,17 @@ public class DvbIClient {
         mCallbacks.remove(handler);
     }
 
-    /** True if a live-TV OrbProvider (or other host) is already registered for linked-app launch. */
+    /**
+     * True if a registered callback can actually launch HTML / XML AIT linked apps
+     * (not a track-only Session callback).
+     */
     public synchronized boolean hasLinkedAppCallback() {
-        return !mCallbacks.isEmpty();
+        for (Callback cb : mCallbacks) {
+            if (cb.canLaunchLinkedApp()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public boolean isType41InstallGateActive() {
@@ -1018,6 +1027,10 @@ public class DvbIClient {
      */
     public void cancelServiceSearch() {
         mDiscoveryEpoch++;
+        if (mType41AitTask != null) {
+            mType41AitTask.cancel(true);
+            mType41AitTask = null;
+        }
         if (mInstallGateActive) {
             Log.w(TAG, "Cancelling type 4.1 install gate (Setup aborted search)");
             cancelType41InstallGate();
@@ -1512,6 +1525,10 @@ public class DvbIClient {
 
     public boolean startServiceSearch(String serviceListURL) {
         mDiscoveryEpoch++;
+        if (mType41AitTask != null) {
+            mType41AitTask.cancel(true);
+            mType41AitTask = null;
+        }
         if (mInstallGateActive) {
             Log.w(TAG, "Cancelling in-progress type 4.1 install gate to start a new search");
             cancelType41InstallGate();
@@ -2039,6 +2056,11 @@ public class DvbIClient {
             if (result == null) {
                 return;
             }
+            if (LINKED_APP_SCHEME_4_1.equals(result.scheme)
+                    && (result.discoveryEpoch != mDiscoveryEpoch || !mInstallGateActive)) {
+                Log.i(TAG, "Ignoring stale type 4.1 XML AIT after search abort");
+                return;
+            }
             // ERRATA0900: a previous instance's XML AIT must not land after setChannel
             // to another instance (re-lock 1.2 → 1.1 applied scheme 1.2 and CCS).
             if (result.generation >= 0 && result.generation != mTuneGeneration) {
@@ -2079,11 +2101,17 @@ public class DvbIClient {
         public String url;
         public String scheme;
         public int generation;
+        public int discoveryEpoch;
 
         public XmlAitAttributes(String url, String scheme, int generation) {
+            this(url, scheme, generation, -1);
+        }
+
+        public XmlAitAttributes(String url, String scheme, int generation, int discoveryEpoch) {
             this.url = url;
             this.scheme = scheme;
             this.generation = generation;
+            this.discoveryEpoch = discoveryEpoch;
         }
     }
 
@@ -2211,8 +2239,12 @@ public class DvbIClient {
                 cb.onLaunchHtmlLinkedApp(launchUrl, LINKED_APP_SCHEME_4_1);
             }
         } else {
-            new GetXmlAitTask().execute(
-                    new XmlAitAttributes(url, LINKED_APP_SCHEME_4_1, mTuneGeneration));
+            if (mType41AitTask != null) {
+                mType41AitTask.cancel(true);
+            }
+            mType41AitTask = new GetXmlAitTask();
+            mType41AitTask.execute(new XmlAitAttributes(
+                    url, LINKED_APP_SCHEME_4_1, mTuneGeneration, mDiscoveryEpoch));
         }
     }
 
@@ -2227,10 +2259,10 @@ public class DvbIClient {
     }
 
     /**
-     * Drop a hung or superseded 4.1 gate without emitting scan-complete. The caller is
-     * starting a replacement search whose finalizeSearch() will notify Setup.
+     * Drop a hung or superseded 4.1 gate without scan-complete. Does not bump
+     * {@link #mDiscoveryEpoch}; Setup abort must call {@link #cancelServiceSearch()}.
      */
-    public void cancelType41InstallGate() {
+    private void cancelType41InstallGate() {
         mMainHandler.removeCallbacks(mInstallGateTimeout);
         mInstallGateActive = false;
         setLinkedAppJsonRpcListener(null);
@@ -2511,6 +2543,8 @@ public class DvbIClient {
     }
 
     public static class Callback {
+        /** Override when this host can launch HTML / XML AIT linked applications. */
+        protected boolean canLaunchLinkedApp() { return false; }
         protected void onProcessXmlAit(String xmlAit, String scheme) { }
         protected void onLaunchHtmlLinkedApp(String url, String scheme) { }
         protected void onApplicationHowRelatedHrefChanged(String href) { }
