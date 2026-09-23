@@ -12,6 +12,8 @@
         let _subs;
         let _eventStreams = { }
         const _events = { };
+        let _manifestEventStreamsReady = false;
+        let _pendingEventPresenceChecks = [];
         let _playbackWatchdog = null;
         let _playingNotified = false;
         const PLAYER_EVENT_APP_SIGNALLING = "urn:dvb:dash:appsignalling:2016";
@@ -49,9 +51,29 @@
             }, PLAYBACK_WATCHDOG_MS);
         }
 
+        function _reportMissingStreamEventIfNeeded(targetUrl, eventName) {
+            if (eventName === "null") {
+                return;
+            }
+            if (_eventStreams[targetUrl] && _eventStreams[targetUrl][eventName]) {
+                return;
+            }
+            console.warn("Stream event with target url '" + targetUrl + "' and name '" + eventName + "' is not present in the manifest.");
+            Android.onStreamEvent(targetUrl, eventName, JSON.stringify({ status: "error" }));
+        }
+
+        function _flushPendingEventPresenceChecks() {
+            const pending = _pendingEventPresenceChecks;
+            _pendingEventPresenceChecks = [];
+            for (let i = 0; i < pending.length; i++) {
+                _reportMissingStreamEventIfNeeded(pending[i].targetUrl, pending[i].eventName);
+            }
+        }
+
         function _onManifestLoaded(e) {
             console.log("manifest data:", e);
             _eventStreams = { };
+            _manifestEventStreamsReady = false;
             function processEventStreams(eventStreams) {
                 if (eventStreams) {
                     for (let eventStream of eventStreams) {
@@ -70,6 +92,8 @@
                 }
             }
             console.log("event streams", _eventStreams);
+            _manifestEventStreamsReady = true;
+            _flushPendingEventPresenceChecks();
         }
 
         function _streamEventHandler(payload) {
@@ -388,6 +412,7 @@
                     _events[e] = 0;
                     _player.off(e, _streamEventHandler);
                 }
+                _manifestEventStreamsReady = false;
                 _player.attachSource(url);
                 _player.play();
                 _startPlaybackWatchdog();
@@ -434,9 +459,12 @@
                 else {
                     _events[targetUrl]++;
                 }
-                if (eventName !== "null" && !(_eventStreams[targetUrl] && _eventStreams[targetUrl][eventName])) {
-                    console.warn("Stream event with target url '" + targetUrl + "' and name '" + eventName + "' is not present in the manifest.");
-                    Android.onStreamEvent(targetUrl, eventName, JSON.stringify({ status: "error" }));
+                if (eventName !== "null") {
+                    if (!_manifestEventStreamsReady) {
+                        _pendingEventPresenceChecks.push({ targetUrl: targetUrl, eventName: eventName });
+                    } else {
+                        _reportMissingStreamEventIfNeeded(targetUrl, eventName);
+                    }
                 }
                 console.log("Added event listener for event " + targetUrl);
             }
@@ -460,6 +488,7 @@
         }
     </script>
 </head>
+<!-- Hold fill is black so an empty overlay is not DTVKit green. -->
 <body onload="_initialize()" style='margin:0;background-color:#000;'>
     <video id='orb_video' style="display:block;"></video>
     <div id='orb_subsPH'></div>
