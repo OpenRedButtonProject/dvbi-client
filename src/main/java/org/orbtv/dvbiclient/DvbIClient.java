@@ -201,7 +201,16 @@ public class DvbIClient {
      */
     private volatile int mRequestedInstanceIndex = -1;
     private String mPendingDashUri;
+    /**
+     * Set by {@link #mServiceManagerCallback}. Re-shows the PIN dialog when a tune finds the
+     * terminal already on a service that is still parentally blocked and the dialog was dismissed.
+     */
+    private Runnable mRePromptBlocked;
+
     private final TunedServiceManager.Callback mServiceManagerCallback = new TunedServiceManager.Callback() {
+        {
+            mRePromptBlocked = this::requestOverrideIfNeeded;
+        }
         @Override
         public void onInstanceChanged(ServiceInstance fromInstance, ServiceInstance toInstance) {
             DvbIChannelAdapter channel;
@@ -1277,6 +1286,7 @@ public class DvbIClient {
                 // and select highest-priority available (RF) (ERRATA0900 step 9).
                 if (isCurrentHighestPriorityInstance(current, currentInst)) {
                     Log.i(TAG, "tune: already on " + uid + "; keep parental state");
+                    rePromptParentalIfBlocked();
                     return true;
                 }
                 Log.i(TAG, "tune: service Channel unlocks instance; selecting highest-priority "
@@ -1368,6 +1378,18 @@ public class DvbIClient {
         String requestedUri = requested.getUri();
         String currentUri = currentInst.getUri();
         return requestedUri != null && requestedUri.equals(currentUri);
+    }
+
+    /**
+     * Same-service tune while the block is still in force and the dialog was dismissed
+     * (Back). A dialog that is already up has a pending request and is left alone.
+     */
+    private void rePromptParentalIfBlocked() {
+        if (!mBlocked || mRePromptBlocked == null) {
+            return;
+        }
+        Log.i(TAG, "tune: still blocked on return to this service; showing parental dialog");
+        mRePromptBlocked.run();
     }
 
     /**
