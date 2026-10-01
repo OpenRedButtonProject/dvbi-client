@@ -738,9 +738,13 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                 while (cursor.moveToNext()) {
                     Triplet triplet = null;
                     Map<String, String> deliveryParams = null;
+                    Integer instanceRating = null;
                     try {
                         deliveryParams = parseDeliveryParameters(new JSONObject(new String(cursor.getBlob(0))));
                         triplet = Triplet.parseFromURI(deliveryParams.get("DVBTriplet"));
+                        if (deliveryParams != null && deliveryParams.containsKey("ParentalRating")) {
+                            instanceRating = Integer.parseInt(deliveryParams.get("ParentalRating"));
+                        }
                     } catch (Exception e) { }
                     instances.add(instanceBuilder
                                     .setDisplayNames(getServiceNamesForUID(db, uid + "_" + instances.size()))
@@ -750,6 +754,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
                                     .setTriplet(triplet)
                                     .setRelatedMaterials(getRelatedMaterials(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + cursor.getInt(2)))
                                     .setAvailabilityPeriods(getAvailabilityPeriods(db, FOREIGN_KEY_PREFIX_INSTANCE + uid + "_" + cursor.getInt(2)))
+                                    .setParentalRating(instanceRating)
                                     .build());
                 }
             }

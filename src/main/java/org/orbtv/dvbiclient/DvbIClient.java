@@ -85,6 +85,10 @@ public class DvbIClient {
     private static final String PREF_LA43_CTYPE_PREFIX = "dvbi_la43_ctype:";
     private static final String PREF_LA_DEADLINE_PREFIX = "dvbi_la_deadline:";
     private static final String PREF_LA_RENEW_FAILED_PREFIX = "dvbi_la_renew_failed:";
+    private static final String PREF_LA13_PERSIST_PREFIX = "dvbi_la13_persist:";
+    private static final String PREF_LA13_QUERY_PREFIX = "dvbi_la13_query:";
+    private static final String PREF_LA13_RETRY_UNTIL_PREFIX = "dvbi_la13_retry_until:";
+    private static final String PREF_LA13_RETRY_SCOPE_PREFIX = "dvbi_la13_retry_scope:";
     private static final long TYPE_41_INSTALL_TIMEOUT_MS = 60_000L;
     private static final long EMPTY_RENEW_DEFAULT_WAIT_MS = 5_000L;
     private static final Pattern APPLICATION_LOCATION = Pattern.compile(
@@ -109,6 +113,7 @@ public class DvbIClient {
 
     public static final String LINKED_APP_SCHEME_1_1 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:1.1";
     public static final String LINKED_APP_SCHEME_1_2 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:1.2";
+    public static final String LINKED_APP_SCHEME_1_3 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:1.3";
     public static final String LINKED_APP_SCHEME_2 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:2";
     public static final String LINKED_APP_SCHEME_4_1 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:4.1";
     public static final String LINKED_APP_SCHEME_4_2 = "urn:dvb:metadata:cs:LinkedApplicationCS:2019:4.2";
@@ -121,6 +126,13 @@ public class DvbIClient {
     public static final String LA_CONSENT_UNCHANGED = "org.dvb.la.consent_unchanged";
     public static final String LA_RENEW_SUCCESS = "org.dvb.la.renew_success";
     public static final String LA_RENEW_FAILURE = "org.dvb.la.renew_failure";
+    public static final String LA_PREPLAY_SUCCESS = "org.dvb.la.preplay_success";
+    public static final String LA_PREPLAY_FAILURE = "org.dvb.la.preplay_failure";
+
+    private static final int PREPLAY_NONE = 0;
+    private static final int PREPLAY_RUNNING = 1;
+    private static final int PREPLAY_SUCCEEDED = 2;
+    private static final int PREPLAY_FAILED = 3;
 
     private static final Map<String, Integer> HBBTV_CHANNEL_STATUS_LOOKUP = new HashMap<String, Integer>() {{
         // key names according to the events received from Javascript interface in DvbIView,
@@ -172,6 +184,13 @@ public class DvbIClient {
     private String mPendingServiceListUri;
     private String mPendingServiceListXml;
     private final List<QueryPair> mInstallQueryPairs = new ArrayList<>();
+    private final List<QueryPair> mPreplayQueryPairs = new ArrayList<>();
+    private int mPreplayState = PREPLAY_NONE;
+    private String mPreplayServiceUid;
+    private String mPreplayAitUrl;
+    private boolean mPreplaySignalledOnInstance;
+    private final Runnable mType13RetryRunnable = this::onType13RetryElapsed;
+    private String mType13RetryUid;
     private String mPendingRenewUrl;
     private String mPendingInstallationToken;
     private String mActiveRenewUrl;
@@ -231,6 +250,21 @@ public class DvbIClient {
                     // (A.2.20.6 / ERRATA0900). handleNative generates RF status that the
                     // polyfill may treat as CCS while this method is still running.
                     publishApplicationHowRelatedHref(service, toInstance, false);
+                    boolean instanceInWindow = toInstance == null
+                            || mServiceManager.isInstanceInAvailabilityWindow(toInstance);
+                    String app_1_3 = channel.getLinkedAppUri(LINKED_APP_SCHEME_1_3);
+                    if (!instanceInWindow) {
+                        Log.i(TAG, "Type 1.3 skipped — instance outside availability window (APPS0360)");
+                        app_1_3 = null;
+                    }
+                    if (app_1_3 != null && !continueAfterType13Preplay(channel, service, toInstance,
+                            app_1_3)) {
+                        return;
+                    }
+                    if (!instanceInWindow) {
+                        handleOutsideAvailabilityWindow(service, fromInstance, channelBuilder);
+                        return;
+                    }
                     String app_1_2 = channel.getLinkedAppUri(LINKED_APP_SCHEME_1_2);
                     String dashUri = resolveNativeDashUri(toInstance, uri);
                     boolean instanceLock = mRequestedInstanceIndex >= 0;
@@ -250,6 +284,7 @@ public class DvbIClient {
                         handleLinkedApp1_2(channel, app_1_2, service);
                     } else {
                         if (dashUri != null) {
+                            loadPersistedType13Query(channel.getLinkedAppUri(LINKED_APP_SCHEME_1_3));
                             uri = applyInstallQuery(dashUri);
                         }
                         handleNativeOrLinkedApp1_1(channel, toInstance, service, uri);
@@ -576,6 +611,91 @@ public class DvbIClient {
             });
         }
 
+        /**
+         * TS 103 770 §5.2.3.2.4: run type 1.3 before media / 1.1 / 1.2.
+         * @return true if 1.3 already succeeded for this selection (caller may chain).
+         */
+        private boolean continueAfterType13Preplay(DvbIChannelAdapter channel, Service service,
+                ServiceInstance instance, String appUrl) {
+            if (isType13RetryHeld(service, instance, appUrl)) {
+                Log.i(TAG, "Type 1.3 on retry hold; media not started");
+                applyType13RetryHold(service, instance, appUrl);
+                return false;
+            }
+            if (isType13PersistentSuppressed(service, instance, appUrl)) {
+                Log.i(TAG, "Type 1.3 suppressed by persistent success");
+                loadPersistedType13Query(appUrl);
+                mPreplayState = PREPLAY_SUCCEEDED;
+                mPreplayServiceUid = service.getUniqueIdentifier();
+                return true;
+            }
+            if (mPreplayState == PREPLAY_SUCCEEDED && mPreplayServiceUid != null
+                    && mPreplayServiceUid.equals(service.getUniqueIdentifier())) {
+                return true;
+            }
+            if (mPreplayState == PREPLAY_RUNNING) {
+                Log.i(TAG, "Type 1.3 pre-play already running");
+                return false;
+            }
+            if (mPreplayState == PREPLAY_FAILED) {
+                // Retry prefs already expired (isType13RetryHeld returned false).
+                // Keep FAILED only while the hold is active.
+                Log.i(TAG, "Type 1.3 retry hold expired; allowing relaunch");
+                mPreplayState = PREPLAY_NONE;
+            }
+            int contentAge = resolveContentAge(service, instance);
+            Log.i(TAG, "Type 1.3 parental check: contentAge=" + contentAge
+                    + " threshold=" + mTvInputCallback.getParentalControlAge()
+                    + " overridden=" + mTvInputCallback.isParentalAccessOverridden()
+                    + " instanceRating=" + (instance != null ? instance.getParentalRating() : null)
+                    + " serviceRating=" + (service != null ? service.getParentalRating() : null));
+            if (isParentalBlocked(contentAge)) {
+                Log.i(TAG, "Type 1.3 deferred until parental override (APPS0370)");
+                mBlocked = true;
+                handleRatingBlocked(channel);
+                requestOverrideIfNeeded();
+                return false;
+            }
+            mPreplayState = PREPLAY_RUNNING;
+            mPreplayServiceUid = service.getUniqueIdentifier();
+            mPreplayAitUrl = appUrl;
+            mPreplaySignalledOnInstance = instanceHasLinkedApp(instance, LINKED_APP_SCHEME_1_3);
+            mPreplayQueryPairs.clear();
+            loadPersistedType13Query(appUrl);
+            Log.i(TAG, "Type 1.3 pre-play gate: lloc=preroll url=" + appUrl);
+            mDvbIView.suppressVideoEvents();
+            mTvInputCallback.tuneOffBroadcast();
+            mDvbIView.tuneOff();
+            publishApplicationHowRelatedHref(service, mServiceManager.getTunedInstance(), false);
+            launchApp(appUrl, LINKED_APP_SCHEME_1_3);
+            if (!PLAYER_STATUS_STARTING.equals(mLastState)) {
+                mLastState = PLAYER_STATUS_STARTING;
+                dispatchStartingIfNeeded(channel.getOnid(), channel.getTsid(), channel.getSid());
+            }
+            return false;
+        }
+
+        private void handleOutsideAvailabilityWindow(Service service, ServiceInstance fromInstance,
+                DvbIChannelAdapter.Builder channelBuilder) {
+            Log.i(TAG, "No service instance is currently available.");
+            mTvInputCallback.tuneOffBroadcast();
+            mDvbIView.tuneOff();
+            DvbIChannelAdapter channel = channelBuilder.setServiceInstance(fromInstance).build();
+            mTvInputCallback.notifyVideoAvailable();
+            if (!PLAYER_STATUS_STARTING.equals(mLastState)) {
+                mLastState = PLAYER_STATUS_STARTING;
+                dispatchPlayerStatusChangedEvent(
+                        channel.getOnid(), channel.getTsid(), channel.getSid(),
+                        PLAYER_STATUS_STARTING);
+            }
+            if (channel.getLinkedAppUri(LINKED_APP_SCHEME_2) != null) {
+                launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_2), LINKED_APP_SCHEME_2);
+            } else if (channel.getLinkedAppUri(LINKED_APP_SCHEME_1000_1) != null) {
+                launchApp(channel.getLinkedAppUri(LINKED_APP_SCHEME_1000_1), LINKED_APP_SCHEME_1000_1);
+            }
+            publishApplicationHowRelatedHref(service, fromInstance, true);
+        }
+
         private boolean isStillTuned(Service service) {
             Service tuned = mServiceManager.getTunedService();
             return service != null && tuned != null
@@ -583,9 +703,17 @@ public class DvbIClient {
         }
 
         private int resolveContentAge(Service service) {
+            return resolveContentAge(service, mServiceManager.getTunedInstance());
+        }
+
+        private int resolveContentAge(Service service, ServiceInstance instance) {
             Programme now = mServiceManager.getNowProgramme();
             if (now != null && now.getMinimumAge() > 0) {
                 return now.getMinimumAge();
+            }
+            if (instance != null && instance.getParentalRating() != null
+                    && instance.getParentalRating() > 0) {
+                return instance.getParentalRating();
             }
             Service rated = tunedServiceFromDb();
             if (rated == null) {
@@ -646,6 +774,8 @@ public class DvbIClient {
             if (serviceHasLinkedApp(service, LINKED_APP_SCHEME_2)) {
                 href = LINKED_APP_SCHEME_2;
             }
+        } else if (mPreplayState == PREPLAY_RUNNING) {
+            href = LINKED_APP_SCHEME_1_3;
         } else {
             href = getInstanceHowRelatedHref(instance);
         }
@@ -714,6 +844,22 @@ public class DvbIClient {
             return false;
         }
         for (RelatedMaterial rm : service.getRelatedMaterials()) {
+            if (scheme.equals(rm.getHowRelatedHref()) && rm.isXmlAitContentType()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean instanceHasLinkedApp(ServiceInstance instance, String scheme) {
+        if (instance == null) {
+            return false;
+        }
+        List<RelatedMaterial> materials = instance.getRelatedMaterials();
+        if (materials == null) {
+            return false;
+        }
+        for (RelatedMaterial rm : materials) {
             if (scheme.equals(rm.getHowRelatedHref()) && rm.isXmlAitContentType()) {
                 return true;
             }
@@ -1285,6 +1431,14 @@ public class DvbIClient {
                 // If an O.5.4 pin is holding a lower-priority instance (DASH), unlock
                 // and select highest-priority available (RF) (ERRATA0900 step 9).
                 if (isCurrentHighestPriorityInstance(current, currentInst)) {
+                    if (mPreplayState == PREPLAY_FAILED
+                            && !isType13RetryHeld(current, currentInst, mPreplayAitUrl)) {
+                        Log.i(TAG, "tune: already on " + uid
+                                + "; type 1.3 retry elapsed, relaunching");
+                        mPreplayState = PREPLAY_NONE;
+                        mServiceManager.reselectAfterType13RetryHold();
+                        return true;
+                    }
                     Log.i(TAG, "tune: already on " + uid + "; keep parental state");
                     rePromptParentalIfBlocked();
                     return true;
@@ -1299,6 +1453,11 @@ public class DvbIClient {
             }
         }
         mTuneGeneration++;
+        cancelType13RetryRelaunch();
+        mPreplayState = PREPLAY_NONE;
+        mPreplayServiceUid = null;
+        mPreplayAitUrl = null;
+        mPreplayQueryPairs.clear();
         boolean blocked = mBlocked;
         mBlocked = false;
         mPinnedInstanceOutsideWindow = false;
@@ -1420,6 +1579,11 @@ public class DvbIClient {
         Log.i(TAG, "tuneOff: drop DVB-I selection (gen " + mTuneGeneration + " -> "
             + (mTuneGeneration + 1) + ")");
         mTuneGeneration++;
+        cancelType13RetryRelaunch();
+        mPreplayState = PREPLAY_NONE;
+        mPreplayServiceUid = null;
+        mPreplayAitUrl = null;
+        mPreplayQueryPairs.clear();
         mBlocked = false;
         mOverrideRequestPending = false;
         mLastState = null;
@@ -2090,6 +2254,7 @@ public class DvbIClient {
         Log.d(TAG, "finalizeSearch: Service list discovery completed, triggering callbacks");
         mLastDiscoveryTask = null; // Reset so new searches can be started
         mCurrentServiceListUrl = null; // Clear tracked URL
+        clearType13SessionState();
         for (DvbCallback handler : mDvbCallbacks) {
             handler.onDvbtStatusChanged(100);
         }
@@ -2653,14 +2818,21 @@ public class DvbIClient {
     /**
      * §5.2.3.6: lloc and success query pairs belong on AIT applicationLocation
      * (and DASH MPD URLs), not on the XML AIT fetch URL.
+     * Type 4.1 install query stays on 4.x only. Raw {@code &} in the location
+     * must be escaped or libxml2 rejects the rewritten AIT (APPS0300+).
      */
     private String applyLaunchContextToXmlAit(String xml, String scheme) {
         if (xml == null) {
             return null;
         }
         String lloc = llocForScheme(scheme);
-        boolean installQuery = !mInstallQueryPairs.isEmpty();
-        if (lloc == null && !installQuery) {
+        boolean type4x = LINKED_APP_SCHEME_4_1.equals(scheme)
+                || LINKED_APP_SCHEME_4_2.equals(scheme)
+                || LINKED_APP_SCHEME_4_3.equals(scheme);
+        boolean installQuery = type4x && !mInstallQueryPairs.isEmpty();
+        boolean preplayQuery = LINKED_APP_SCHEME_1_3.equals(scheme)
+                && !mPreplayQueryPairs.isEmpty();
+        if (lloc == null && !installQuery && !preplayQuery) {
             return xml;
         }
         Matcher matcher = APPLICATION_LOCATION.matcher(xml);
@@ -2673,9 +2845,13 @@ public class DvbIClient {
                 location = appendQueryComponent(location, "lloc", lloc);
             }
             if (installQuery) {
-                location = applyInstallQuery(location);
+                location = applyQueryPairs(location, mInstallQueryPairs);
+            }
+            if (preplayQuery) {
+                location = applyQueryPairs(location, mPreplayQueryPairs);
             }
             location = applyInstallationToken(location, scheme);
+            location = escapeXmlText(location);
             matcher.appendReplacement(rewritten,
                     Matcher.quoteReplacement(matcher.group(1) + location + matcher.group(3)));
         }
@@ -2685,6 +2861,17 @@ public class DvbIClient {
         }
         matcher.appendTail(rewritten);
         return rewritten.toString();
+    }
+
+    private static String escapeXmlText(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+        return text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&apos;");
     }
 
     private static String llocForScheme(String scheme) {
@@ -2697,15 +2884,26 @@ public class DvbIClient {
         if (LINKED_APP_SCHEME_4_3.equals(scheme)) {
             return "renewal-of-agreement";
         }
+        if (LINKED_APP_SCHEME_1_3.equals(scheme)) {
+            return "preroll";
+        }
+        if (LINKED_APP_SCHEME_1_2.equals(scheme)) {
+            return "service";
+        }
         return null;
     }
 
     private String applyInstallQuery(String url) {
-        if (url == null || mInstallQueryPairs.isEmpty()) {
+        String result = applyQueryPairs(url, mInstallQueryPairs);
+        return applyQueryPairs(result, mPreplayQueryPairs);
+    }
+
+    private static String applyQueryPairs(String url, List<QueryPair> pairs) {
+        if (url == null || pairs == null || pairs.isEmpty()) {
             return url;
         }
         String result = url;
-        for (QueryPair pair : mInstallQueryPairs) {
+        for (QueryPair pair : pairs) {
             result = appendQueryComponent(result, pair.key, pair.value);
         }
         return result;
@@ -3187,6 +3385,388 @@ public class DvbIClient {
         }
     }
 
+    private void handlePreplayCompletion(String method, String paramsJson) {
+        if (LA_PREPLAY_SUCCESS.equals(method)) {
+            mPreplayQueryPairs.clear();
+            try {
+                JSONObject params = new JSONObject(paramsJson != null ? paramsJson : "{}");
+                parseQueryInto(params, mPreplayQueryPairs);
+                persistType13Query(mPreplayAitUrl, mPreplayQueryPairs);
+                JSONObject response = params.optJSONObject("application_response");
+                if (response != null && !response.isNull("persistent")) {
+                    storeType13Persistent(type13PersistKey(mPreplayServiceUid,
+                            mPreplaySignalledOnInstance ? mServiceManager.getTunedInstance() : null,
+                            mPreplayAitUrl), response.opt("persistent"));
+                }
+            } catch (JSONException e) {
+                Log.w(TAG, "Type 1.3 preplay_success params were not JSON");
+            }
+            mPreplayState = PREPLAY_SUCCEEDED;
+            cancelType13RetryRelaunch();
+            Log.i(TAG, "Type 1.3 preplay_success — chaining to 1.1/1.2 / media");
+            ServiceInstance instance = mServiceManager.getTunedInstance();
+            if (instance != null) {
+                mServiceManagerCallback.onInstanceChanged(instance, instance);
+            }
+            return;
+        }
+        if (LA_PREPLAY_FAILURE.equals(method)) {
+            mPreplayState = PREPLAY_FAILED;
+            Object retry = null;
+            try {
+                JSONObject params = new JSONObject(paramsJson != null ? paramsJson : "{}");
+                JSONObject response = params.optJSONObject("application_response");
+                if (response != null && !response.isNull("retry")) {
+                    retry = response.opt("retry");
+                }
+            } catch (JSONException e) {
+                Log.w(TAG, "Type 1.3 preplay_failure params were not JSON");
+            }
+            Service service = mServiceManager.getTunedService();
+            ServiceInstance instance = mServiceManager.getTunedInstance();
+            storeType13Retry(service, instance, mPreplayAitUrl, mPreplaySignalledOnInstance, retry);
+            Log.i(TAG, "Type 1.3 preplay_failure retry=" + retry);
+            applyType13RetryHold(service, instance, mPreplayAitUrl);
+        }
+    }
+
+    private String type13PersistKey(String serviceUid, ServiceInstance instance, String aitUrl) {
+        StringBuilder key = new StringBuilder();
+        if (serviceUid != null) {
+            key.append(serviceUid);
+        }
+        if (instance != null && instance.getUri() != null) {
+            key.append('|').append(instance.getUri());
+        }
+        if (aitUrl != null) {
+            key.append('|').append(aitUrl);
+        }
+        return key.toString();
+    }
+
+    private void storeType13Persistent(String persistKey, Object persistent) {
+        if (persistKey == null || persistKey.isEmpty() || persistent == null) {
+            return;
+        }
+        String value = String.valueOf(persistent).trim();
+        if (value.isEmpty()) {
+            return;
+        }
+        SharedPreferences prefs = mDvbIView.getContext()
+                .getSharedPreferences("DvbIClient", Context.MODE_PRIVATE);
+        prefs.edit().putString(PREF_LA13_PERSIST_PREFIX + persistKey, value).apply();
+        Log.i(TAG, "Type 1.3 persistent stored key=" + persistKey + " value=" + value);
+    }
+
+    private boolean isType13PersistentSuppressed(Service service, ServiceInstance instance,
+            String aitUrl) {
+        if (service == null) {
+            return false;
+        }
+        SharedPreferences prefs = mDvbIView.getContext()
+                .getSharedPreferences("DvbIClient", Context.MODE_PRIVATE);
+        String persistKey = type13PersistKey(service.getUniqueIdentifier(),
+                instanceHasLinkedApp(instance, LINKED_APP_SCHEME_1_3) ? instance : null, aitUrl);
+        String value = prefs.getString(PREF_LA13_PERSIST_PREFIX + persistKey, null);
+        if (value == null) {
+            persistKey = type13PersistKey(service.getUniqueIdentifier(), null, aitUrl);
+            value = prefs.getString(PREF_LA13_PERSIST_PREFIX + persistKey, null);
+        }
+        if (value == null || value.isEmpty()) {
+            return false;
+        }
+        if ("forever".equalsIgnoreCase(value)) {
+            return true;
+        }
+        try {
+            Instant until = Instant.parse(value);
+            return Instant.now().isBefore(until);
+        } catch (DateTimeParseException e) {
+            Log.w(TAG, "Type 1.3 persistent date was not ISO-8601: " + value);
+            return false;
+        }
+    }
+
+    /**
+     * Drop leftover type 1.3 persist / retry / query after a list install.
+     * Sequential official tests share one DUT: APPS0320 stores persistent=forever,
+     * APPS0410/0440 leave a retry hold, and the next test then skips 1.3.
+     */
+    private void clearType13SessionState() {
+        cancelType13RetryRelaunch();
+        mPreplayState = PREPLAY_NONE;
+        mPreplayServiceUid = null;
+        mPreplayAitUrl = null;
+        mPreplayQueryPairs.clear();
+        if (mDvbIView == null || mDvbIView.getContext() == null) {
+            return;
+        }
+        SharedPreferences prefs = mDvbIView.getContext()
+                .getSharedPreferences("DvbIClient", Context.MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        boolean removed = false;
+        for (String key : prefs.getAll().keySet()) {
+            if (key != null && (key.startsWith(PREF_LA13_PERSIST_PREFIX)
+                    || key.startsWith(PREF_LA13_QUERY_PREFIX)
+                    || key.startsWith(PREF_LA13_RETRY_UNTIL_PREFIX)
+                    || key.startsWith(PREF_LA13_RETRY_SCOPE_PREFIX))) {
+                editor.remove(key);
+                removed = true;
+            }
+        }
+        if (removed) {
+            editor.apply();
+            Log.i(TAG, "Cleared leftover type 1.3 persist/retry/query after service-list update");
+        }
+    }
+
+    private void persistType13Query(String aitUrl, List<QueryPair> pairs) {
+        if (aitUrl == null || aitUrl.isEmpty()) {
+            return;
+        }
+        SharedPreferences prefs = mDvbIView.getContext()
+                .getSharedPreferences("DvbIClient", Context.MODE_PRIVATE);
+        prefs.edit().putString(PREF_LA13_QUERY_PREFIX + aitUrl, queryPairsToJson(pairs)).apply();
+    }
+
+    private void loadPersistedType13Query(String aitUrl) {
+        if (aitUrl == null || aitUrl.isEmpty()) {
+            return;
+        }
+        if (!mPreplayQueryPairs.isEmpty()) {
+            return;
+        }
+        SharedPreferences prefs = mDvbIView.getContext()
+                .getSharedPreferences("DvbIClient", Context.MODE_PRIVATE);
+        String json = prefs.getString(PREF_LA13_QUERY_PREFIX + aitUrl, null);
+        if (json == null || json.isEmpty()) {
+            return;
+        }
+        try {
+            JSONArray arr = new JSONArray(json);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject item = arr.optJSONObject(i);
+                if (item == null) {
+                    continue;
+                }
+                String key = item.optString("key", null);
+                if (key == null || key.isEmpty()) {
+                    continue;
+                }
+                mPreplayQueryPairs.add(new QueryPair(key, item.optString("value", "")));
+            }
+        } catch (JSONException e) {
+            Log.w(TAG, "Stored type 1.3 query was not JSON");
+        }
+    }
+
+    private String type13RetryKey(Service service, ServiceInstance instance, String aitUrl,
+            boolean instanceScope) {
+        if (instanceScope && instance != null && instance.getUri() != null) {
+            return "inst:" + instance.getUri();
+        }
+        if (service != null) {
+            return "svc:" + service.getUniqueIdentifier();
+        }
+        return aitUrl != null ? "ait:" + aitUrl : null;
+    }
+
+    private void storeType13Retry(Service service, ServiceInstance instance, String aitUrl,
+            boolean instanceScope, Object retry) {
+        String key = type13RetryKey(service, instance, aitUrl, instanceScope);
+        if (key == null) {
+            return;
+        }
+        SharedPreferences prefs = mDvbIView.getContext()
+                .getSharedPreferences("DvbIClient", Context.MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        if (retry == null || JSONObject.NULL.equals(retry)) {
+            editor.remove(PREF_LA13_RETRY_UNTIL_PREFIX + key);
+            editor.remove(PREF_LA13_RETRY_SCOPE_PREFIX + key);
+            editor.apply();
+            return;
+        }
+        long until;
+        if ("infinite".equalsIgnoreCase(String.valueOf(retry))) {
+            until = Long.MAX_VALUE;
+        } else {
+            try {
+                until = System.currentTimeMillis() + (long) (Double.parseDouble(
+                        String.valueOf(retry)) * 1000L);
+            } catch (NumberFormatException e) {
+                Log.w(TAG, "Type 1.3 retry was not a number or infinite: " + retry);
+                return;
+            }
+        }
+        editor.putLong(PREF_LA13_RETRY_UNTIL_PREFIX + key, until);
+        editor.putString(PREF_LA13_RETRY_SCOPE_PREFIX + key, instanceScope ? "instance" : "service");
+        editor.apply();
+    }
+
+    private boolean isType13RetryHeld(Service service, ServiceInstance instance, String aitUrl) {
+        String instKey = type13RetryKey(service, instance, aitUrl, true);
+        String svcKey = type13RetryKey(service, instance, aitUrl, false);
+        return isRetryKeyHeld(instKey) || isRetryKeyHeld(svcKey);
+    }
+
+    private boolean isRetryKeyHeld(String key) {
+        if (key == null) {
+            return false;
+        }
+        SharedPreferences prefs = mDvbIView.getContext()
+                .getSharedPreferences("DvbIClient", Context.MODE_PRIVATE);
+        if (!prefs.contains(PREF_LA13_RETRY_UNTIL_PREFIX + key)) {
+            return false;
+        }
+        long until = prefs.getLong(PREF_LA13_RETRY_UNTIL_PREFIX + key, 0L);
+        if (until == Long.MAX_VALUE) {
+            return true;
+        }
+        if (System.currentTimeMillis() >= until) {
+            prefs.edit().remove(PREF_LA13_RETRY_UNTIL_PREFIX + key)
+                    .remove(PREF_LA13_RETRY_SCOPE_PREFIX + key).apply();
+            return false;
+        }
+        return true;
+    }
+
+    private void applyType13RetryHold(Service service, ServiceInstance instance, String aitUrl) {
+        scheduleType13RetryRelaunch(service, instance, aitUrl);
+        boolean instanceScope = instanceHasLinkedApp(instance, LINKED_APP_SCHEME_1_3);
+        if (instanceScope) {
+            mServiceManager.discardCurrentInstanceAndReselect("type 1.3 preplay_failure");
+            return;
+        }
+        Log.i(TAG, "Type 1.3 service-level retry hold uid="
+                + (service != null ? service.getUniqueIdentifier() : aitUrl));
+        mDvbIView.tuneOff();
+        mTvInputCallback.tuneOffBroadcast();
+    }
+
+    private void cancelType13RetryRelaunch() {
+        mMainHandler.removeCallbacks(mType13RetryRunnable);
+        mType13RetryUid = null;
+    }
+
+    /**
+     * APPS0400 scenario (a): the service stays selected after service-level
+     * preplay_failure. SharedPreferences expire, but nothing re-enters the
+     * 1.3 gate unless we wake the instance after the hold.
+     */
+    private void scheduleType13RetryRelaunch(Service service, ServiceInstance instance,
+            String aitUrl) {
+        cancelType13RetryRelaunch();
+        long remaining = remainingType13RetryMs(service, instance, aitUrl);
+        if (remaining < 0L) {
+            return;
+        }
+        if (remaining == 0L) {
+            remaining = 1L; // spec: do not retry immediately, even for retry=0
+        }
+        mType13RetryUid = service != null ? service.getUniqueIdentifier() : null;
+        Log.i(TAG, "Type 1.3 retry relaunch in " + remaining + "ms uid=" + mType13RetryUid);
+        mMainHandler.postDelayed(mType13RetryRunnable, remaining);
+    }
+
+    /**
+     * @return remaining milliseconds, or {@code -1} if there is no finite hold
+     */
+    private long remainingType13RetryMs(Service service, ServiceInstance instance, String aitUrl) {
+        long inst = remainingRetryKeyMs(type13RetryKey(service, instance, aitUrl, true));
+        long svc = remainingRetryKeyMs(type13RetryKey(service, instance, aitUrl, false));
+        if (inst == Long.MAX_VALUE || svc == Long.MAX_VALUE) {
+            return -1L;
+        }
+        if (inst < 0L && svc < 0L) {
+            return -1L;
+        }
+        return Math.max(Math.max(inst, 0L), Math.max(svc, 0L));
+    }
+
+    /** @return remaining ms, {@link Long#MAX_VALUE} if infinite, or -1 if no hold */
+    private long remainingRetryKeyMs(String key) {
+        if (key == null || mDvbIView == null || mDvbIView.getContext() == null) {
+            return -1L;
+        }
+        SharedPreferences prefs = mDvbIView.getContext()
+                .getSharedPreferences("DvbIClient", Context.MODE_PRIVATE);
+        if (!prefs.contains(PREF_LA13_RETRY_UNTIL_PREFIX + key)) {
+            return -1L;
+        }
+        long until = prefs.getLong(PREF_LA13_RETRY_UNTIL_PREFIX + key, 0L);
+        if (until == Long.MAX_VALUE) {
+            return Long.MAX_VALUE;
+        }
+        return Math.max(0L, until - System.currentTimeMillis());
+    }
+
+    private synchronized void onType13RetryElapsed() {
+        Service service = mServiceManager.getTunedService();
+        if (service == null || mType13RetryUid == null
+                || !mType13RetryUid.equals(service.getUniqueIdentifier())) {
+            Log.i(TAG, "Type 1.3 retry elapsed; service no longer selected");
+            return;
+        }
+        ServiceInstance instance = mServiceManager.getTunedInstance();
+        if (isType13RetryHeld(service, instance, mPreplayAitUrl)) {
+            Log.i(TAG, "Type 1.3 retry elapsed but hold still active; rescheduling");
+            scheduleType13RetryRelaunch(service, instance, mPreplayAitUrl);
+            return;
+        }
+        Log.i(TAG, "Type 1.3 retry elapsed; reselecting uid=" + mType13RetryUid);
+        mPreplayState = PREPLAY_NONE;
+        mType13RetryUid = null;
+        mServiceManager.reselectAfterType13RetryHold();
+    }
+
+    private String queryPairsToJson(List<QueryPair> pairs) {
+        JSONArray arr = new JSONArray();
+        if (pairs == null) {
+            return arr.toString();
+        }
+        for (QueryPair pair : pairs) {
+            try {
+                JSONObject item = new JSONObject();
+                item.put("key", pair.key);
+                item.put("value", pair.value);
+                arr.put(item);
+            } catch (JSONException ignored) {
+            }
+        }
+        return arr.toString();
+    }
+
+    private static void parseQueryInto(JSONObject params, List<QueryPair> dest) {
+        if (params == null || dest == null || !params.has("query") || params.isNull("query")) {
+            return;
+        }
+        Object query = params.opt("query");
+        if (query instanceof JSONArray) {
+            JSONArray arr = (JSONArray) query;
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject item = arr.optJSONObject(i);
+                if (item == null) {
+                    continue;
+                }
+                String key = item.optString("key", null);
+                if (key == null || key.isEmpty()) {
+                    continue;
+                }
+                dest.add(new QueryPair(key, item.optString("value", "")));
+            }
+        } else if (query instanceof JSONObject) {
+            JSONObject obj = (JSONObject) query;
+            Iterator<String> keys = obj.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                if (key == null || key.isEmpty()) {
+                    continue;
+                }
+                dest.add(new QueryPair(key, obj.optString(key, "")));
+            }
+        }
+    }
+
     /**
      * Atomic snapshot of a type 4.x JSON-RPC completion (method + params together).
      */
@@ -3219,6 +3799,7 @@ public class DvbIClient {
                 listener.onLinkedAppJsonRpc(completion.method, completion.paramsJson);
             }
             handleConsentOrRenewCompletion(completion.method, completion.paramsJson);
+            handlePreplayCompletion(completion.method, completion.paramsJson);
         };
         if (Looper.getMainLooper().isCurrentThread()) {
             deliver.run();

@@ -215,6 +215,34 @@ public class TunedServiceManager {
         return true;
     }
 
+    /**
+     * After a finite type 1.3 retry hold expires, discarded instances are
+     * selectable again (TS 103 770 §5.2.3.2.4 / APPS0430). Notify even when
+     * the instance is unchanged so a service-level 1.3 can relaunch in place
+     * (APPS0400 scenario (a)).
+     */
+    public void reselectAfterType13RetryHold() {
+        ServiceInstance from;
+        ServiceInstance next;
+        synchronized (mLock) {
+            if (mTunedService == null) {
+                return;
+            }
+            mDiscardedInstances.clear();
+            from = mTunedInstance;
+            next = getMaxPriorityInstance(mTunedService);
+            if (next == null) {
+                return;
+            }
+            mTunedInstance = next;
+            Log.i(TAG, "Type 1.3 retry elapsed; reselect instance "
+                    + (next == from ? "unchanged" : next.getDeliveryType()));
+            for (Callback callback : mCallbacks) {
+                callback.onInstanceChanged(from, next);
+            }
+        }
+    }
+
     public synchronized DvbIChannelAdapter getTunedChannel() {
         return new DvbIChannelAdapter.Builder()
                 .setService(mTunedService)
@@ -360,6 +388,13 @@ public class TunedServiceManager {
             }
         }
         return false;
+    }
+
+    /** True if the instance is inside its Availability Period (or has none). */
+    public boolean isInstanceInAvailabilityWindow(ServiceInstance instance) {
+        synchronized (mLock) {
+            return isInstanceAvailable(instance);
+        }
     }
 
     private boolean isInstanceAvailable(ServiceInstance instance) {

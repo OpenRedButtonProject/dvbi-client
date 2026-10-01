@@ -17,6 +17,7 @@
 package org.orbtv.dvbiclient.model;
 
 import android.content.ContentValues;
+import android.util.Log;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -40,8 +41,13 @@ public class ServiceInstance implements IService {
     private String mDeliveryType;
     private Map<String, String> mDeliveryParameters = new HashMap<>();
     private List<RelatedMaterial> mRelatedMaterials = new ArrayList<>();
+    private Integer mParentalRating;
 
     private ServiceInstance() { }
+
+    public Integer getParentalRating() {
+        return mParentalRating;
+    }
 
     public Map<String, String> getDisplayNames() {
         return mDisplayNames;
@@ -86,7 +92,8 @@ public class ServiceInstance implements IService {
                 + "\ndeliveryParams: " + this.mDeliveryParameters
                 + "\npriority: " + this.mPriority
                 + "\ntriplet: " + this.mTriplet
-                + "\ndelivery type: " + this.mDeliveryType;
+                + "\ndelivery type: " + this.mDeliveryType
+                + "\nparentalRating: " + this.mParentalRating;
         for (RelatedMaterial mat : mRelatedMaterials) {
             ret += "\n" + mat.toString();
         }
@@ -103,6 +110,13 @@ public class ServiceInstance implements IService {
                 params.put(entry.getKey(), entry.getValue());
             }
             catch (JSONException e) {
+                e.printStackTrace();
+            }
+        }
+        if (mParentalRating != null) {
+            try {
+                params.put("ParentalRating", mParentalRating);
+            } catch (JSONException e) {
                 e.printStackTrace();
             }
         }
@@ -129,6 +143,17 @@ public class ServiceInstance implements IService {
                         break;
                     case "RelatedMaterial":
                         instance.mRelatedMaterials.add(RelatedMaterial.parseFromXML(xpp));
+                        break;
+                    case "ParentalGuidance":
+                    case "tva:ParentalGuidance":
+                    case "ParentalRating":
+                    case "tva:ParentalRating":
+                        Integer age = parseInstanceParentalRating(xpp, xpp.getName());
+                        if (age != null) {
+                            instance.mParentalRating = age;
+                            Log.i("ServiceInstance",
+                                    "Parsed instance ParentalGuidance age=" + age);
+                        }
                         break;
                     case "DVBTriplet":
                         instance.mTriplet = Triplet.parseFromXML(xpp);
@@ -200,6 +225,28 @@ public class ServiceInstance implements IService {
         return null;
     }
 
+    private static Integer parseInstanceParentalRating(XmlPullParser xpp, String startName)
+            throws Exception {
+        if (startName != null && startName.endsWith("ParentalRating")) {
+            return Service.parseParentalRatingAge(xpp);
+        }
+        Integer age = null;
+        int eventType = xpp.next();
+        while (!(eventType == XmlPullParser.END_TAG && xpp.getName() != null
+                && xpp.getName().endsWith("ParentalGuidance"))
+                && eventType != XmlPullParser.END_DOCUMENT) {
+            if (eventType == XmlPullParser.START_TAG && xpp.getName() != null
+                    && xpp.getName().endsWith("ParentalRating")) {
+                Integer parsed = Service.parseParentalRatingAge(xpp);
+                if (parsed != null) {
+                    age = parsed;
+                }
+            }
+            eventType = xpp.next();
+        }
+        return age;
+    }
+
     private static String parseServiceType(String uri) {
         if (uri != null) {
             String lastPart = uri.substring(uri.lastIndexOf(":") + 1);
@@ -245,6 +292,10 @@ public class ServiceInstance implements IService {
             mInstance.mRelatedMaterials = value;
             return this;
         }
+        public ServiceInstance.Builder setParentalRating(Integer value) {
+            mInstance.mParentalRating = value;
+            return this;
+        }
         public ServiceInstance build() {
             ServiceInstance instance = new ServiceInstance();
             instance.mDisplayNames = mInstance.mDisplayNames;
@@ -255,6 +306,7 @@ public class ServiceInstance implements IService {
             instance.mDeliveryType = mInstance.mDeliveryType;
             instance.mDeliveryParameters = mInstance.mDeliveryParameters;
             instance.mRelatedMaterials = mInstance.mRelatedMaterials;
+            instance.mParentalRating = mInstance.mParentalRating;
             return instance;
         }
     }

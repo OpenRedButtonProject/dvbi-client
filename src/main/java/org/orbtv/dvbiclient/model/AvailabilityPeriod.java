@@ -66,8 +66,16 @@ public final class AvailabilityPeriod {
                     case "Period":
                         builder = new Builder();
                         intervals = new ArrayList<>();
-                        builder.setValidFrom(getSecondsFromDate(xpp.getAttributeValue(null, "validFrom")))
-                                .setValidTo(getSecondsFromDate(xpp.getAttributeValue(null, "validTo")));
+                        String from = xpp.getAttributeValue(null, "validFrom");
+                        if (from == null) {
+                            from = xpp.getAttributeValue(null, "start");
+                        }
+                        String to = xpp.getAttributeValue(null, "validTo");
+                        if (to == null) {
+                            to = xpp.getAttributeValue(null, "end");
+                        }
+                        builder.setValidFrom(getSecondsFromDate(from))
+                                .setValidTo(getSecondsFromDate(to));
                         break;
                     case "Interval":
                         intervals.add(new Interval.Builder()
