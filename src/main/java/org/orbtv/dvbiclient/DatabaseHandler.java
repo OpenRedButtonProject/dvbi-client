@@ -166,7 +166,7 @@ public class DatabaseHandler extends SQLiteOpenHelper {
         Cursor cursor = null;
         try
         {
-            cursor = db.query(SERVICE_LISTS_TABLE, projection, null, null, null, null, null);
+            cursor = db.query(SERVICE_LISTS_TABLE, projection, null, null, null, null, COLUMN_ID);
             if (cursor != null)
             {
                 ServiceList.Builder listBuilder = new ServiceList.Builder();

@@ -3076,6 +3076,14 @@ public class DvbIClient {
     }
 
     /**
+     * Withdraw agreement applies to the active list, and only while it still has
+     * a type 4.2 linked application.
+     */
+    public boolean canWithdrawInstalledList(String uid) {
+        return uid != null && uid.equals(mActiveListUid) && hasType42LinkedApp();
+    }
+
+    /**
      * True while a type 4.3 launch is outstanding this cycle: waiting for the
      * first renewurl time, waiting for a host, scheduled at a deadline, or
      * presenting. Not true merely because a list still has a renewurl after
