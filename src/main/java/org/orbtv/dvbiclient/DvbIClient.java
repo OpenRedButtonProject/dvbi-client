@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- 
+
 package org.orbtv.dvbiclient;
 
 import android.content.Context;
@@ -1700,17 +1700,14 @@ public class DvbIClient {
     }
 
     public void setVideoRectangle(int x, int y, int width, int height) {
-        String deliveryType = "";
-        try {
-            deliveryType = mServiceManager.getTunedInstance().getDeliveryType();
+        ServiceInstance instance = mServiceManager.getTunedInstance();
+        if (instance == null || !"dvb-dash".equals(instance.getDeliveryType())) {
+            return;
         }
-        catch (NullPointerException e) { }
-        if (deliveryType.equals("dvb-dash")) {
-            Log.i(TAG, "Setting video rectangle to " + x + ", " + y + ", " + width + ", " + height);
-            mDvbIView.setVideoRectangle(x, y, width, height);
-            for (DvbCallback handler : mDvbCallbacks) {
-                handler.onSetVideoRectangle(x, y, width, height);
-            }
+        Log.i(TAG, "Setting video rectangle to " + x + ", " + y + ", " + width + ", " + height);
+        mDvbIView.setVideoRectangle(x, y, width, height);
+        for (DvbCallback handler : mDvbCallbacks) {
+            handler.onSetVideoRectangle(x, y, width, height);
         }
     }
 
@@ -1847,50 +1844,59 @@ public class DvbIClient {
             // Default to HbbTV test harness service list URL for test environment
             serviceListURL = "http://hbbtv1.test/servicelist.xml";
         }
+        mCurrentServiceListUrl = serviceListURL;
         Log.d(TAG, "Starting service search at " + serviceListURL);
         mLastDiscoveryTask.execute(serviceListURL);
         return true;
     }
 
     /**
-     * Update the DVB-I service list if the version has changed.
-     * Per TS 103 770, the @version attribute is incremented for each change in the data.
-     * This method checks the version before reloading to avoid unnecessary updates.
-     *
-     * @param serviceListURL URL to the service list XML, or null to use default
-     * @return true if service list was updated or is being updated, false if version unchanged or error
+     * Reload {@code serviceListURL} only when that same URL already has a stored version
+     * and the published version is different. A new URL, a missing URL, and a version
+     * that cannot be read leave the installed list in place. The check runs off the
+     * caller thread. Returns false so the caller can sync the services already stored;
+     * a later reload syncs again after it commits.
      */
     public boolean updateServiceList(String serviceListURL) {
         if (serviceListURL == null || serviceListURL.isEmpty()) {
-            // Default to HbbTV test harness service list URL for test environment
-            serviceListURL = "http://hbbtv1.test/servicelist.xml";
+            Log.d(TAG, "No installed DVB-I service list URL, skipping refresh");
+            return false;
         }
-
-        // Get current version from service list
-        String currentVersion = getServiceListVersion(serviceListURL);
-        if (currentVersion == null) {
-            // Could not determine version, reload to be safe
-            Log.d(TAG, "Could not determine DVB-I service list version, reloading to ensure latest data");
-            return startServiceSearch(serviceListURL);
+        if (mInstallGateActive || mLastDiscoveryTask != null) {
+            Log.d(TAG, "Service list search already in progress, skipping version refresh");
+            return false;
         }
-
-        // Check stored version
         SharedPreferences prefs = mDvbIView.getContext().getSharedPreferences("DvbIClient", Context.MODE_PRIVATE);
         String lastKnownVersion = prefs.getString(PREF_DVBI_SERVICE_LIST_VERSION, null);
         String lastKnownUrl = prefs.getString(PREF_DVBI_SERVICE_LIST_URL, null);
-
-        if (lastKnownVersion == null || !currentVersion.equals(lastKnownVersion) ||
-            !serviceListURL.equals(lastKnownUrl)) {
-            Log.d(TAG, String.format("DVB-I service list version changed from %s to %s, reloading",
-                lastKnownVersion, currentVersion));
-            // Store URL and version to save after successful load
-            mCurrentServiceListUrl = serviceListURL;
-            boolean started = startServiceSearch(serviceListURL);
-            return started;
-        } else {
-            Log.d(TAG, String.format("DVB-I service list version unchanged (%s), skipping reload", currentVersion));
+        if (lastKnownVersion == null || !serviceListURL.equals(lastKnownUrl)) {
+            Log.d(TAG, "No stored version for installed service list, leaving it unchanged");
             return false;
         }
+        final String installedVersion = lastKnownVersion;
+        mIoExecutor.execute(() -> refreshServiceListIfVersionChanged(serviceListURL, installedVersion));
+        return false;
+    }
+
+    private void refreshServiceListIfVersionChanged(String serviceListURL, String installedVersion) {
+        String currentVersion = getServiceListVersion(serviceListURL);
+        if (currentVersion == null) {
+            Log.d(TAG, "Could not determine DVB-I service list version, leaving installed list unchanged");
+            return;
+        }
+        if (currentVersion.equals(installedVersion)) {
+            Log.d(TAG, String.format("DVB-I service list version unchanged (%s), skipping reload", currentVersion));
+            return;
+        }
+        Log.d(TAG, String.format("DVB-I service list version changed from %s to %s, reloading",
+                installedVersion, currentVersion));
+        mMainHandler.post(() -> {
+            if (mInstallGateActive || mLastDiscoveryTask != null) {
+                Log.d(TAG, "Service list search started while version was checked, skipping reload");
+                return;
+            }
+            startServiceSearch(serviceListURL);
+        });
     }
 
     /**
@@ -2913,18 +2919,16 @@ public class DvbIClient {
     /**
      * §5.2.3.6: lloc and success query pairs belong on AIT applicationLocation
      * (and DASH MPD URLs), not on the XML AIT fetch URL.
-     * Type 4.1 install query stays on 4.x only. Raw {@code &} in the location
-     * must be escaped or libxml2 rejects the rewritten AIT (APPS0300+).
+     * Install pairs are appended before any other application's pairs.
+     * Raw {@code &} in the location must be escaped or libxml2 rejects the
+     * rewritten AIT (APPS0300+).
      */
     private String applyLaunchContextToXmlAit(String xml, String scheme) {
         if (xml == null) {
             return null;
         }
         String lloc = llocForScheme(scheme);
-        boolean type4x = LINKED_APP_SCHEME_4_1.equals(scheme)
-                || LINKED_APP_SCHEME_4_2.equals(scheme)
-                || LINKED_APP_SCHEME_4_3.equals(scheme);
-        boolean installQuery = type4x && !mInstallQueryPairs.isEmpty();
+        boolean installQuery = !mInstallQueryPairs.isEmpty();
         boolean preplayQuery = !mPreplayQueryPairs.isEmpty()
                 && (LINKED_APP_SCHEME_1_3.equals(scheme)
                 || LINKED_APP_SCHEME_1_2.equals(scheme)
@@ -3140,6 +3144,159 @@ public class DvbIClient {
             return false;
         }
         return true;
+    }
+
+    /**
+     * A stored service list. {@link #getUid()} is the list URL used at install.
+     * {@link #getLabel()} is the filename, for the setup screen.
+     */
+    public static final class InstalledServiceList {
+        private final String mUid;
+        private final String mLabel;
+
+        InstalledServiceList(String uid, String label) {
+            mUid = uid;
+            mLabel = label;
+        }
+
+        public String getUid() {
+            return mUid;
+        }
+
+        public String getLabel() {
+            return mLabel;
+        }
+
+        @Override
+        public String toString() {
+            return mLabel;
+        }
+    }
+
+    /** @return true when at least one service list is stored, including a withdrawn list. */
+    public boolean hasInstalledServiceLists() {
+        return !getInstalledServiceLists().isEmpty();
+    }
+
+    /**
+     * URL of the list whose version can be refreshed. Prefers the URL saved at install.
+     * A single stored list is used when that preference is missing. Several stored lists
+     * and no saved URL have no single list to refresh.
+     */
+    public String getInstalledServiceListUrl() {
+        SharedPreferences prefs = mDvbIView.getContext().getSharedPreferences("DvbIClient", Context.MODE_PRIVATE);
+        String url = prefs.getString(PREF_DVBI_SERVICE_LIST_URL, null);
+        if (url != null && !url.isEmpty()) {
+            return url;
+        }
+        List<InstalledServiceList> lists = getInstalledServiceLists();
+        if (lists.size() == 1) {
+            return lists.get(0).getUid();
+        }
+        return null;
+    }
+
+    public List<InstalledServiceList> getInstalledServiceLists() {
+        List<InstalledServiceList> installed = new ArrayList<>();
+        List<ServiceList> lists = mDbHandler.getServiceLists();
+        if (lists == null) {
+            return installed;
+        }
+        for (ServiceList list : lists) {
+            String uid = list.getUID();
+            if (uid == null || uid.isEmpty()) {
+                continue;
+            }
+            installed.add(new InstalledServiceList(uid, labelForServiceList(uid)));
+        }
+        return installed;
+    }
+
+    /**
+     * Delete one stored service list and its services. Does not run the type 4.2
+     * withdrawal application. Clears that list's install-completion state so a later
+     * scan runs its type 4.1 gate again.
+     *
+     * @return true when that list was stored and has been removed
+     */
+    public boolean removeInstalledServiceList(String uid) {
+        if (uid == null || uid.isEmpty()) {
+            return false;
+        }
+        boolean found = false;
+        List<ServiceList> lists = mDbHandler.getServiceLists();
+        if (lists != null) {
+            for (ServiceList list : lists) {
+                if (uid.equals(list.getUID())) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if (!found) {
+            return false;
+        }
+        if (mPendingServiceList != null && uid.equals(mPendingServiceList.getUID())) {
+            cancelServiceSearch();
+        }
+        mDbHandler.deleteServiceList(uid);
+        SharedPreferences prefs = mDvbIView.getContext().getSharedPreferences("DvbIClient", Context.MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        for (String key : new HashSet<>(prefs.getAll().keySet())) {
+            if (key.endsWith(uid)) {
+                editor.remove(key);
+            }
+        }
+        Set<String> completed = new HashSet<>(prefs.getStringSet(PREF_LA41_COMPLETED_UIDS, Collections.emptySet()));
+        completed.remove(uid);
+        Set<String> withdrawn = new HashSet<>(prefs.getStringSet(PREF_LA_WITHDRAWN_UIDS, Collections.emptySet()));
+        withdrawn.remove(uid);
+        editor.putStringSet(PREF_LA41_COMPLETED_UIDS, completed);
+        editor.putStringSet(PREF_LA_WITHDRAWN_UIDS, withdrawn);
+        if (uid.equals(prefs.getString(PREF_LA_ACTIVE_UID, null))) {
+            editor.remove(PREF_LA_ACTIVE_UID);
+        }
+        if (uid.equals(prefs.getString(PREF_DVBI_SERVICE_LIST_URL, null))) {
+            editor.remove(PREF_DVBI_SERVICE_LIST_URL);
+            editor.remove(PREF_DVBI_SERVICE_LIST_VERSION);
+        }
+        editor.apply();
+        if (uid.equals(mActiveListUid)) {
+            stopAllRenewTimers();
+            mActiveListUid = null;
+            mActiveRenewUrl = null;
+            mActiveInstallationToken = null;
+            mPendingRenewUrl = null;
+            mPendingInstallationToken = null;
+            mType42Uri = null;
+            mType42ContentType = null;
+            mType43Uri = null;
+            mType43ContentType = null;
+            mRenewDeadlineMs = -1L;
+            mType42AppRunning = false;
+            mType43AppRunning = false;
+            mLastRenewFailed = false;
+        }
+        mEpgManager.refreshServiceLists();
+        Log.i(TAG, "Removed installed service list " + uid);
+        for (DvbCallback handler : mDvbCallbacks) {
+            handler.onServiceDeleted();
+        }
+        return true;
+    }
+
+    private static String labelForServiceList(String uid) {
+        String path = uid;
+        int query = path.indexOf('?');
+        if (query >= 0) {
+            path = path.substring(0, query);
+        }
+        int slash = path.lastIndexOf('/');
+        if (slash >= 0 && slash + 1 < path.length()) {
+            path = path.substring(slash + 1);
+        }
+        String decoded = Uri.decode(path);
+        return decoded == null || decoded.isEmpty() ? uid : decoded;
     }
 
     public boolean isConsentWithdrawn() {
