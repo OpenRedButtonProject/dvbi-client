@@ -1616,6 +1616,25 @@ public class DvbIClient {
         });
     }
 
+    public synchronized int getTuneGeneration() {
+        return mTuneGeneration;
+    }
+
+    /**
+     * Drop the DVB-I selection only when {@code generation} is still current.
+     * A session teardown can block in broadcast {@code Player.stop} while Live Channels
+     * has already tuned on the next session. That newer tune must keep its selection
+     * and in-flight XML AIT.
+     */
+    public synchronized void tuneOffIfCurrent(int generation) {
+        if (generation != mTuneGeneration) {
+            Log.i(TAG, "tuneOff: ignored stale teardown gen " + generation
+                + " current " + mTuneGeneration);
+            return;
+        }
+        tuneOff();
+    }
+
     public synchronized void tuneOff() {
         Log.i(TAG, "tuneOff: drop DVB-I selection (gen " + mTuneGeneration + " -> "
             + (mTuneGeneration + 1) + ")");
