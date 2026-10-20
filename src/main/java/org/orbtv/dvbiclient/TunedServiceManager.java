@@ -43,6 +43,8 @@ public class TunedServiceManager {
     private List<Programme> mNowNextProgrammes = new ArrayList<>();
     private final Set<ServiceInstance> mDiscardedInstances = new HashSet<>();
     private final Object mLock = new Object();
+    /** Set while one caller is discarding. A duplicate failure must not tuneOff the replacement. */
+    private boolean mDiscardClaimed;
 
     public TunedServiceManager(EpgManager epgManager, DatabaseHandler dbHandler) {
         mEpgManager = epgManager;
@@ -175,6 +177,31 @@ public class TunedServiceManager {
                 return;
             }
             startTunedServiceThread(true);
+        }
+    }
+
+    /**
+     * Reserve {@code expected} for one discard. A second failure callback (two main-frame
+     * 404s for the same page, ERRATA0610) blocks here and then loses: either the claim is
+     * already held, or {@link #mTunedInstance} is already the fallback. The loser must not
+     * call {@code tuneOff}, which would stop the fallback the winner has just started.
+     *
+     * @return true if this caller may tuneOff and reselect
+     */
+    public boolean claimDiscard(ServiceInstance expected) {
+        synchronized (mLock) {
+            if (expected == null || mTunedInstance != expected || mDiscardClaimed) {
+                return false;
+            }
+            mDiscardClaimed = true;
+            return true;
+        }
+    }
+
+    /** Pair with a successful {@link #claimDiscard}. Safe to call when no claim is held. */
+    public void releaseDiscardClaim() {
+        synchronized (mLock) {
+            mDiscardClaimed = false;
         }
     }
 

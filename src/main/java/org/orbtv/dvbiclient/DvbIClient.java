@@ -1397,21 +1397,31 @@ public class DvbIClient {
             Log.i(TAG, "LA12_DISCARD: current instance is not LA 1.2; ignoring (" + reason + ")");
             return;
         }
-        Log.i(TAG, "LA12_DISCARD: " + reason);
-        mPendingLinkedAppUrl = null;
-        mPendingLinkedAppScheme = null;
-        if (killRunningApp) {
-            mTvInputCallback.destroyHbbtvApplication();
+        // Claim before tuneOff. The duplicate 404 otherwise stops the fallback DASH
+        // the first caller has already selected (ERRATA0610).
+        if (!mServiceManager.claimDiscard(current)) {
+            Log.i(TAG, "LA12_DISCARD: instance already discarded; ignoring (" + reason + ")");
+            return;
         }
-        // Native DASH/RF and any A.2.4.1 decoder hold must be released before the
-        // next instance presents. After destroyApplication() the WebView is
-        // about:blank, so JS will not call setPresentationSuspended(false).
-        clearPendingNativePresentation();
-        mDvbIView.tuneOff();
-        mTvInputCallback.tuneOffBroadcast();
-        setPresentationSuspended(false);
-        if (!mServiceManager.discardCurrentInstanceAndReselect(reason)) {
-            Log.w(TAG, "LA12_DISCARD: discard/reselect did not change instance (" + reason + ")");
+        try {
+            Log.i(TAG, "LA12_DISCARD: " + reason);
+            mPendingLinkedAppUrl = null;
+            mPendingLinkedAppScheme = null;
+            if (killRunningApp) {
+                mTvInputCallback.destroyHbbtvApplication();
+            }
+            // Native DASH/RF and any A.2.4.1 decoder hold must be released before the
+            // next instance presents. After destroyApplication() the WebView is
+            // about:blank, so JS will not call setPresentationSuspended(false).
+            clearPendingNativePresentation();
+            mDvbIView.tuneOff();
+            mTvInputCallback.tuneOffBroadcast();
+            setPresentationSuspended(false);
+            if (!mServiceManager.discardCurrentInstanceAndReselect(reason)) {
+                Log.w(TAG, "LA12_DISCARD: discard/reselect did not change instance (" + reason + ")");
+            }
+        } finally {
+            mServiceManager.releaseDiscardClaim();
         }
     }
 
