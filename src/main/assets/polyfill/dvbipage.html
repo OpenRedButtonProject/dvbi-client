@@ -11,7 +11,16 @@
             pointer-events: none;
             z-index: 2;
         }
-        #orb_video { width: 100%; height: 100%; position: absolute; left: 0; top: 0; z-index: 1; }
+        #orb_video {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            left: 0;
+            top: 0;
+            z-index: 1;
+            transform: translateZ(0);
+            -webkit-transform: translateZ(0);
+        }
     </style>
     <script type="text/javascript" src="dash.all.min.js"></script>
     <script>
@@ -128,19 +137,61 @@
             Android.onStreamEvent(event.eventStream.schemeIdUri, event.eventStream.value, JSON.stringify(eventData));
         }
 
+        const _iso639_2_to_1 = {
+            aar: 'aa', abk: 'ab', afr: 'af', aka: 'ak', amh: 'am', ara: 'ar', arg: 'an',
+            asm: 'as', ava: 'av', ave: 'ae', aym: 'ay', aze: 'az', bak: 'ba', bam: 'bm',
+            bel: 'be', ben: 'bn', bis: 'bi', bod: 'bo', bos: 'bs', bre: 'br', bul: 'bg',
+            cat: 'ca', ces: 'cs', cha: 'ch', che: 'ce', chu: 'cu', chv: 'cv', cor: 'kw',
+            cos: 'co', cre: 'cr', cym: 'cy', dan: 'da', deu: 'de', div: 'dv', dzo: 'dz',
+            ell: 'el', eng: 'en', epo: 'eo', est: 'et', eus: 'eu', ewe: 'ee', fao: 'fo',
+            fas: 'fa', fij: 'fj', fin: 'fi', fra: 'fr', fry: 'fy', ful: 'ff', gla: 'gd',
+            gle: 'ga', glg: 'gl', glv: 'gv', grn: 'gn', guj: 'gu', hat: 'ht', hau: 'ha',
+            heb: 'he', her: 'hz', hin: 'hi', hmo: 'ho', hrv: 'hr', hun: 'hu', hye: 'hy',
+            ibo: 'ig', ido: 'io', iii: 'ii', iku: 'iu', ile: 'ie', ina: 'ia', ind: 'id',
+            ipk: 'ik', isl: 'is', ita: 'it', jav: 'jv', jpn: 'ja', kal: 'kl', kan: 'kn',
+            kas: 'ks', kat: 'ka', kau: 'kr', kaz: 'kk', khm: 'km', kik: 'ki', kin: 'rw',
+            kir: 'ky', kom: 'kv', kon: 'kg', kor: 'ko', kua: 'kj', kur: 'ku', lao: 'lo',
+            lat: 'la', lav: 'lv', lim: 'li', lin: 'ln', lit: 'lt', ltz: 'lb', lub: 'lu',
+            lug: 'lg', mah: 'mh', mal: 'ml', mar: 'mr', mkd: 'mk', mlg: 'mg', mlt: 'mt',
+            mon: 'mn', mri: 'mi', msa: 'ms', mya: 'my', nau: 'na', nav: 'nv', nbl: 'nr',
+            nde: 'nd', ndo: 'ng', nep: 'ne', nld: 'nl', nno: 'nn', nob: 'nb', nor: 'no',
+            nya: 'ny', oci: 'oc', oji: 'oj', ori: 'or', orm: 'om', oss: 'os', pan: 'pa',
+            pli: 'pi', pol: 'pl', por: 'pt', pus: 'ps', que: 'qu', roh: 'rm', ron: 'ro',
+            run: 'rn', rus: 'ru', sag: 'sg', san: 'sa', sin: 'si', slk: 'sk', slv: 'sl',
+            sme: 'se', smo: 'sm', sna: 'sn', snd: 'sd', som: 'so', sot: 'st', spa: 'es',
+            sqi: 'sq', srd: 'sc', srp: 'sr', ssw: 'ss', sun: 'su', swa: 'sw', swe: 'sv',
+            tah: 'ty', tam: 'ta', tat: 'tt', tel: 'te', tgk: 'tg', tgl: 'tl', tha: 'th',
+            tir: 'ti', ton: 'to', tsn: 'tn', tso: 'ts', tuk: 'tk', tur: 'tr', twi: 'tw',
+            uig: 'ug', ukr: 'uk', urd: 'ur', uzb: 'uz', ven: 've', vie: 'vi', vol: 'vo',
+            wln: 'wa', wol: 'wo', xho: 'xh', yid: 'yi', yor: 'yo', zha: 'za', zho: 'zh',
+            zul: 'zu',
+            chi: 'zh', cze: 'cs', dut: 'nl', fre: 'fr', ger: 'de', gre: 'el', ice: 'is',
+            mac: 'mk', mao: 'mi', may: 'ms', per: 'fa', slo: 'sk', tib: 'bo', wel: 'cy'
+        };
+
+        function _primaryLang(code) {
+            if (!code) {
+                return '';
+            }
+            const t = String(code).toLowerCase().replace('_', '-').split('-')[0].trim();
+            if (!t) {
+                return '';
+            }
+            return _iso639_2_to_1[t] || t;
+        }
+
         function _langMatches(trackLang, preferred) {
             if (!preferred) {
                 return true;
             }
-            const t = String(trackLang || '').toLowerCase();
+            const t = _primaryLang(trackLang);
+            if (!t) {
+                return false;
+            }
             const parts = String(preferred).toLowerCase().replace(/\s+/g, '').split(',');
             for (let i = 0; i < parts.length; i++) {
-                const p = parts[i];
-                if (!p || !t) {
-                    continue;
-                }
-                if (t === p || t.indexOf(p) === 0 || p.indexOf(t) === 0 ||
-                        t.substring(0, 2) === p.substring(0, 2)) {
+                const p = _primaryLang(parts[i]);
+                if (p && t === p) {
                     return true;
                 }
             }
@@ -223,9 +274,10 @@
                         document.body.appendChild(_subs);
                     }
                     if (_subs) {
-                        _subs.style.visibility = enable ? "visible" : "hidden";
+                        const want = enable ? "visible" : "hidden";
+                        result = _subs.style.visibility !== want;
+                        _subs.style.visibility = want;
                     }
-                    result = true;
                     break;
                 default:
                     break;
@@ -381,6 +433,8 @@
         function _initialize() {
             _subs = document.getElementById("orb_subsPH");
             _video = document.getElementById("orb_video");
+            _video.style.transform = 'translateZ(0)';
+            _video.style.webkitTransform = 'translateZ(0)';
             _player = orb_dashjs.MediaPlayer().create();
             _player.updateSettings({
                 streaming: {
