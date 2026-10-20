@@ -171,6 +171,7 @@ public class DvbIClient {
     private List<TvTrackInfo> mTracks = new ArrayList<>(); // TODO: should it be part of TunedServiceManager?
     private HashMap<Integer, TvTrackInfo> mSelectedTracks = new HashMap<>(); // TODO: should it be part of TunedServiceManager?
     private boolean mSubtitlesEnabled = false;
+    private String mPreferredSubtitleLanguage = "";
     private HashMap<Integer, Boolean> mIsUnselected = new HashMap<>();
     private volatile ITvInputCallback mTvInputCallback;
     private final EpgManager mEpgManager;
@@ -1044,6 +1045,7 @@ public class DvbIClient {
             }
             mTracks = tracks;
             mSelectedTracks = selectedTracks;
+            applySubtitleSelectionLocked();
             for (Callback cb : mCallbacks) {
                 cb.onTracksUpdated();
                 for (Map.Entry<Integer, String> entry : changedTracks.entrySet()) {
@@ -1306,20 +1308,93 @@ public class DvbIClient {
 
     public synchronized TvTrackInfo getSelectedTrack(int type) { return mSelectedTracks.get(type); }
 
-    public void setSubtitlesEnabled(boolean enable) {
-        if (enable != mSubtitlesEnabled) {
-            mSubtitlesEnabled = enable;
-            TvTrackInfo subsTrack = mSelectedTracks.get(TvTrackInfo.TYPE_SUBTITLE);
-            if (subsTrack != null) {
-                mDvbIView.selectTrack(
-                        TRACK_TYPE_LOOKUP.get(TvTrackInfo.TYPE_SUBTITLE),
-                        enable ? subsTrack.getId().split(":")[0] : "undefined"
-                );
-            }
+    public synchronized void setPreferredSubtitleLanguage(String language) {
+        mPreferredSubtitleLanguage = language != null ? language : "";
+        Log.i(TAG, "DASH_SUBS preferred language=" + mPreferredSubtitleLanguage);
+        mDvbIView.setSubtitles(mSubtitlesEnabled, mPreferredSubtitleLanguage);
+        if (mSubtitlesEnabled) {
+            applySubtitleSelectionLocked();
         }
     }
 
+    public synchronized void setSubtitlesEnabled(boolean enable) {
+        Log.i(TAG, "DASH_SUBS enabled=" + enable + " lang=" + mPreferredSubtitleLanguage
+                + " tracks=" + mTracks.size());
+        mSubtitlesEnabled = enable;
+        mDvbIView.setSubtitles(enable, mPreferredSubtitleLanguage);
+        if (!enable) {
+            mSelectedTracks.remove(TvTrackInfo.TYPE_SUBTITLE);
+            mDvbIView.selectTrack(TRACK_TYPE_LOOKUP.get(TvTrackInfo.TYPE_SUBTITLE), "undefined");
+            return;
+        }
+        applySubtitleSelectionLocked();
+    }
+
     public boolean getSubtitlesEnabled() { return mSubtitlesEnabled; }
+
+    private void applySubtitleSelectionLocked() {
+        if (!mSubtitlesEnabled) {
+            mSelectedTracks.remove(TvTrackInfo.TYPE_SUBTITLE);
+            return;
+        }
+        TvTrackInfo chosen = pickSubtitleTrackLocked();
+        if (chosen == null) {
+            return;
+        }
+        TvTrackInfo current = mSelectedTracks.get(TvTrackInfo.TYPE_SUBTITLE);
+        if (current != null && current.getId().equals(chosen.getId())
+                && !Boolean.TRUE.equals(mIsUnselected.get(TvTrackInfo.TYPE_SUBTITLE))) {
+            return;
+        }
+        mSelectedTracks.put(TvTrackInfo.TYPE_SUBTITLE, chosen);
+        mIsUnselected.remove(TvTrackInfo.TYPE_SUBTITLE);
+        mDvbIView.selectTrack(TRACK_TYPE_LOOKUP.get(TvTrackInfo.TYPE_SUBTITLE),
+                chosen.getId().split(":")[0]);
+    }
+
+    private TvTrackInfo pickSubtitleTrackLocked() {
+        TvTrackInfo fallback = null;
+        for (TvTrackInfo track : mTracks) {
+            if (track.getType() != TvTrackInfo.TYPE_SUBTITLE) {
+                continue;
+            }
+            if (fallback == null) {
+                fallback = track;
+            }
+            if (languageMatches(track.getLanguage(), mPreferredSubtitleLanguage)) {
+                return track;
+            }
+        }
+        TvTrackInfo selected = mSelectedTracks.get(TvTrackInfo.TYPE_SUBTITLE);
+        if (selected != null) {
+            return selected;
+        }
+        return fallback;
+    }
+
+    private static boolean languageMatches(String trackLang, String preferred) {
+        if (preferred == null || preferred.isEmpty()) {
+            return true;
+        }
+        if (trackLang == null || trackLang.isEmpty()) {
+            return false;
+        }
+        String t = trackLang.toLowerCase(Locale.ROOT);
+        for (String token : preferred.toLowerCase(Locale.ROOT).split(",")) {
+            String p = token.trim().replace('_', '-');
+            if (p.isEmpty()) {
+                continue;
+            }
+            if (t.equals(p) || t.startsWith(p) || p.startsWith(t)) {
+                return true;
+            }
+            if (t.length() >= 2 && p.length() >= 2
+                    && t.substring(0, 2).equals(p.substring(0, 2))) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     public synchronized boolean selectTrack(int type, String id) {
         // mandatory condition as OrbProvider sends an id of "0" when a track was previously unselected

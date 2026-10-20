@@ -38,6 +38,7 @@ public class DvbIView extends WebView {
     private final Context mContext;
     private String mLastUrl = "about:blank";
     private boolean mSubsEnabled = false;
+    private String mPreferredSubLang = "";
     private Boolean mPageLoaded = false;
     private Boolean mIsSuspended = false;
     /**
@@ -170,8 +171,7 @@ public class DvbIView extends WebView {
                 Log.i(TAG, "onPageFinished " + url + "...");
                 if (DVBI_PAGE.equals(url)) {
                     synchronized (mPageLoaded) {
-                        evaluateJavascript("orb_loadMedia(" + JSONObject.quote(mLastUrl)
-                                + ", " + mSubsEnabled + ")", null);
+                        evaluateJavascript(loadMediaJs(mSubsEnabled), null);
                         mPageLoaded = true;
                         applyVideoRectangleJs();
                         mSuppressVideoEvents = false;
@@ -252,8 +252,7 @@ public class DvbIView extends WebView {
                         this.clearFocus();
                     }
                     if (Boolean.TRUE.equals(mPageLoaded) && DVBI_PAGE.equals(this.getUrl())) {
-                        evaluateJavascript("orb_loadMedia(" + JSONObject.quote(mLastUrl)
-                                + ", " + enableSubs + ")", null);
+                        evaluateJavascript(loadMediaJs(enableSubs), null);
                         mSuppressVideoEvents = false;
                     } else {
                         mPageLoaded = false;
@@ -338,10 +337,35 @@ public class DvbIView extends WebView {
                 + mVideoRectW + "," + mVideoRectH + ")", null);
     }
 
-    public void selectTrack(String type, String id) {
+    public void setSubtitles(boolean enable, String language) {
+        mSubsEnabled = enable;
+        if (language != null) {
+            mPreferredSubLang = language;
+        }
+        Log.i(TAG, "DASH_SUBS setSubtitles enabled=" + enable + " lang=" + mPreferredSubLang);
         mContext.getMainExecutor().execute(() -> {
-            evaluateJavascript("orb_selectTrack('" + type + "'," + id + ")", null);
+            synchronized (mPageLoaded) {
+                if (Boolean.TRUE.equals(mPageLoaded)) {
+                    evaluateJavascript("orb_setSubtitles(" + enable + ", "
+                            + JSONObject.quote(mPreferredSubLang) + ")", null);
+                }
+            }
         });
+    }
+
+    public void selectTrack(String type, String id) {
+        final String idJs = (id == null || "undefined".equals(id))
+                ? "undefined" : JSONObject.quote(id);
+        Log.i(TAG, "DASH_SUBS selectTrack type=" + type + " id=" + id);
+        mContext.getMainExecutor().execute(() -> {
+            evaluateJavascript("orb_selectTrack(" + JSONObject.quote(type) + "," + idJs + ")",
+                    null);
+        });
+    }
+
+    private String loadMediaJs(boolean enableSubs) {
+        return "orb_loadMedia(" + JSONObject.quote(mLastUrl) + ", " + enableSubs + ", "
+                + JSONObject.quote(mPreferredSubLang) + ")";
     }
 
     public void addStreamEventListener(String targetUrl, String eventName) {

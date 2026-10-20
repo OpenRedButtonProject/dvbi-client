@@ -1,8 +1,17 @@
 <html>
 <head>
     <style>
-        #orb_subsPH { position: static; overflow: auto; pointer-events:none; }
-        #orb_video { width: 100%; height: 100%; position: absolute; }
+        #orb_subsPH {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            pointer-events: none;
+            z-index: 2;
+        }
+        #orb_video { width: 100%; height: 100%; position: absolute; left: 0; top: 0; z-index: 1; }
     </style>
     <script type="text/javascript" src="dash.all.min.js"></script>
     <script>
@@ -17,6 +26,11 @@
         let _playbackWatchdog = null;
         let _playingNotified = false;
         let _manifestRequested = false;
+        let _subsEnabled = false;
+        let _preferredSubLang = '';
+        let _textAppliedOn = false;
+        let _textAppliedId = null;
+        let _applyingText = false;
         const PLAYER_EVENT_APP_SIGNALLING = "urn:dvb:dash:appsignalling:2016";
         const PLAYER_EVENT_EPG_METADATA = "urn:dvb:iptv:cpm:2014";
         const PLAYBACK_WATCHDOG_MS = 10000;
@@ -114,6 +128,80 @@
             Android.onStreamEvent(event.eventStream.schemeIdUri, event.eventStream.value, JSON.stringify(eventData));
         }
 
+        function _langMatches(trackLang, preferred) {
+            if (!preferred) {
+                return true;
+            }
+            const t = String(trackLang || '').toLowerCase();
+            const parts = String(preferred).toLowerCase().replace(/\s+/g, '').split(',');
+            for (let i = 0; i < parts.length; i++) {
+                const p = parts[i];
+                if (!p || !t) {
+                    continue;
+                }
+                if (t === p || t.indexOf(p) === 0 || p.indexOf(t) === 0 ||
+                        t.substring(0, 2) === p.substring(0, 2)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function _applyTextPreference() {
+            if (!_player || _applyingText) {
+                return;
+            }
+            _applyingText = true;
+            try {
+                const tracks = _player.getTracksFor('text') || [];
+                console.log("DASH_SUBS apply enabled=" + _subsEnabled +
+                    " lang=" + _preferredSubLang + " tracks=" + tracks.length);
+                if (!_subsEnabled) {
+                    if (_textAppliedOn) {
+                        if (typeof _player.enableText === 'function') {
+                            _player.enableText(false);
+                        }
+                        if (typeof _player.setTextTrack === 'function') {
+                            _player.setTextTrack(-1);
+                        }
+                    }
+                    _setTrackEnabled('text', false);
+                    _textAppliedOn = false;
+                    _textAppliedId = null;
+                    return;
+                }
+                _setTrackEnabled('text', true);
+                if (typeof _player.enableText === 'function') {
+                    _player.enableText(true);
+                }
+                let chosen = tracks.find(function(tr) {
+                    return _langMatches(tr.lang, _preferredSubLang);
+                });
+                if (!chosen && tracks.length) {
+                    chosen = tracks[0];
+                }
+                if (!chosen) {
+                    return;
+                }
+                const already = _textAppliedOn && _textAppliedId === chosen.id;
+                const cur = _player.getCurrentTrackFor('text');
+                if (!already && cur !== chosen && typeof _player.setCurrentTrack === 'function') {
+                    console.log("DASH_SUBS selecting text track id=" + chosen.id + " lang=" + chosen.lang);
+                    _player.setCurrentTrack(chosen);
+                }
+                if (!already && typeof _player.setTextTrack === 'function') {
+                    const idx = tracks.indexOf(chosen);
+                    if (idx >= 0) {
+                        _player.setTextTrack(idx);
+                    }
+                }
+                _textAppliedOn = true;
+                _textAppliedId = chosen.id;
+            } finally {
+                _applyingText = false;
+            }
+        }
+
         function _setTrackEnabled(type, enable) {
             let result = false;
             console.log("Setting track of type", type, "to enabled=" + enable);
@@ -131,15 +219,13 @@
                     }
                     break;
                 case "text":
-                    result = enable === !_subs.parentNode;
-                    if (result) {
-                        if (enable) {
-                            document.body.appendChild(_subs);
-                        }
-                        else {
-                            _subs.parentNode.removeChild(_subs);
-                        }
+                    if (_subs && !_subs.parentNode) {
+                        document.body.appendChild(_subs);
                     }
+                    if (_subs) {
+                        _subs.style.visibility = enable ? "visible" : "hidden";
+                    }
+                    result = true;
                     break;
                 default:
                     break;
@@ -407,11 +493,18 @@
             };
             console.log("tracks:", tracks);
             Android.onVideoEvent('DVBI_TRACKS_UPDATED', JSON.stringify(tracks));
+            _applyTextPreference();
         }
-        function orb_loadMedia(url, enableSubs) {
+        function orb_loadMedia(url, enableSubs, lang) {
             _playingNotified = false;
             _manifestRequested = false;
             _lastSource = url;
+            _subsEnabled = !!enableSubs;
+            if (lang !== undefined && lang !== null) {
+                _preferredSubLang = lang;
+            }
+            _textAppliedOn = false;
+            _textAppliedId = null;
             for (const e in _events) {
                 _events[e] = 0;
                 _player.off(e, _streamEventHandler);
@@ -430,26 +523,62 @@
             _startPlaybackWatchdog();
             _setTrackEnabled("video", true);
             _setTrackEnabled("audio", true);
-            _setTrackEnabled("text", enableSubs);
+            _applyTextPreference();
+        }
+
+        function orb_setSubtitles(enabled, lang) {
+            _subsEnabled = !!enabled;
+            if (lang !== undefined && lang !== null) {
+                _preferredSubLang = lang;
+            }
+            console.log("DASH_SUBS orb_setSubtitles enabled=" + _subsEnabled + " lang=" + _preferredSubLang);
+            _applyTextPreference();
         }
 
         function orb_selectTrack(type, id) {
-            if (id !== undefined) {
+            if (type === 'text') {
+                if (id !== undefined && id !== null) {
+                    _subsEnabled = true;
+                } else {
+                    _subsEnabled = false;
+                }
+            }
+            if (id !== undefined && id !== null) {
                 var track = _player
                     .getTracksFor(type)
-                    .find((track) => track.id === id);
+                    .find((track) => track.id == id);
                 if (track) {
                     if (track !== _player.getCurrentTrackFor(type)) {
                         console.log("Selecting track of type", type, "and lang", track.lang);
                         _player.setCurrentTrack(track);
                     }
-                    else if (_setTrackEnabled(type, true)) {
+                    if (type === 'text' && typeof _player.enableText === 'function') {
+                        _player.enableText(true);
+                    }
+                    if (type === 'text' && typeof _player.setTextTrack === 'function') {
+                        var tracks = _player.getTracksFor('text') || [];
+                        var idx = tracks.indexOf(track);
+                        if (idx >= 0) {
+                            _player.setTextTrack(idx);
+                        }
+                    }
+                    if (_setTrackEnabled(type, true)) {
                         Android.onVideoEvent('DVBI_TRACK_CHANGED', JSON.stringify(_getTrackDataFromMediaInfo(track, true)));
                     }
+                } else if (type === 'text') {
+                    _applyTextPreference();
                 }
             }
-            else if (_setTrackEnabled(type, false)) {
-                Android.onVideoEvent('DVBI_TRACK_CHANGED', JSON.stringify({type:type}));
+            else {
+                if (type === 'text' && typeof _player.enableText === 'function') {
+                    _player.enableText(false);
+                }
+                if (type === 'text' && typeof _player.setTextTrack === 'function') {
+                    _player.setTextTrack(-1);
+                }
+                if (_setTrackEnabled(type, false)) {
+                    Android.onVideoEvent('DVBI_TRACK_CHANGED', JSON.stringify({type:type}));
+                }
             }
         }
 
@@ -488,6 +617,12 @@
             _video.style.top = y + 'px';
             _video.style.width = width + 'px';
             _video.style.height = height + 'px';
+            if (_subs) {
+                _subs.style.left = x + 'px';
+                _subs.style.top = y + 'px';
+                _subs.style.width = width + 'px';
+                _subs.style.height = height + 'px';
+            }
         }
     </script>
 </head>
