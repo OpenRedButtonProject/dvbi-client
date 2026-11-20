@@ -177,6 +177,13 @@ public class DvbIClient {
     private String mPreferredSubtitleLanguage = "";
     private HashMap<Integer, Boolean> mIsUnselected = new HashMap<>();
     /**
+     * Track that was selected when the application called unselectComponent.
+     * handleTrackChange clears mSelectedTracks, and a later tracks snapshot
+     * still marks that track selected. Restore uses this instead of treating
+     * the snapshot as a new selection.
+     */
+    private final HashMap<Integer, TvTrackInfo> mTrackBeforeUnselect = new HashMap<>();
+    /**
      * Component ids from video/broadcast.selectComponent. A terminal caption
      * reapply or framework onSelectTrack must not replace one of these while
      * its Adaptation Set is still in the current Period.
@@ -403,6 +410,7 @@ public class DvbIClient {
                 mTracks.clear();
                 mSelectedTracks.clear();
                 mIsUnselected.clear();
+                mTrackBeforeUnselect.clear();
                 mAppOverrideTrackId.clear();
                 mTvInputCallback.tuneOffBroadcast();
                 invalidateErrorTimer();
@@ -530,6 +538,7 @@ public class DvbIClient {
                 mTracks.clear();
                 mSelectedTracks.clear();
                 mIsUnselected.clear();
+                mTrackBeforeUnselect.clear();
                 mAppOverrideTrackId.clear();
                 mTvInputCallback.tuneOffBroadcast();
                 if (mPresentationSuspended) {
@@ -554,6 +563,7 @@ public class DvbIClient {
                 mTracks.clear();
                 mSelectedTracks.clear();
                 mIsUnselected.clear();
+                mTrackBeforeUnselect.clear();
                 mAppOverrideTrackId.clear();
                 Triplet rfTriplet = toInstance.getTriplet();
                 if (rfTriplet != null) {
@@ -814,6 +824,7 @@ public class DvbIClient {
             mTracks.clear();
             mSelectedTracks.clear();
             mIsUnselected.clear();
+            mTrackBeforeUnselect.clear();
             mAppOverrideTrackId.clear();
             mTvInputCallback.tuneOffBroadcast();
             invalidateErrorTimer();
@@ -1032,6 +1043,12 @@ public class DvbIClient {
                             }
                             break;
                         }
+                        if (isAppUnselectedLocked(key)) {
+                            // The player named a track after the application
+                            // unselected this type. Keep it disabled.
+                            mDvbIView.selectTrack(TRACK_TYPE_LOOKUP.get(key), "undefined");
+                            break;
+                        }
                         String dashId = data.getString("id");
                         for (TvTrackInfo track : mTracks) {
                             if (track.getType() != key) {
@@ -1097,6 +1114,19 @@ public class DvbIClient {
                 TvTrackInfo forced = findTrack(tracks, type, mAppOverrideTrackId.get(type));
                 if (forced != null) {
                     selectedTracks.put(type, forced);
+                }
+            }
+            // unselectComponent stays in force. dash.js still reports the last
+            // track of a disabled type as selected; that is not a new selection.
+            for (int type : new int[] {
+                    TvTrackInfo.TYPE_VIDEO,
+                    TvTrackInfo.TYPE_AUDIO}) {
+                if (!isAppUnselectedLocked(type)) {
+                    continue;
+                }
+                TvTrackInfo reported = selectedTracks.remove(type);
+                if (reported != null) {
+                    mTrackBeforeUnselect.put(type, reported);
                 }
             }
             for (int key : TRACK_TYPE_LOOKUP.keySet()) {
@@ -1440,6 +1470,7 @@ public class DvbIClient {
         }
         mSelectedTracks.put(TvTrackInfo.TYPE_SUBTITLE, chosen);
         mIsUnselected.remove(TvTrackInfo.TYPE_SUBTITLE);
+        mTrackBeforeUnselect.remove(TvTrackInfo.TYPE_SUBTITLE);
         mDvbIView.selectTrack(TRACK_TYPE_LOOKUP.get(TvTrackInfo.TYPE_SUBTITLE),
                 chosen.getId().split(":")[0]);
     }
@@ -1568,11 +1599,18 @@ public class DvbIClient {
         // application override even when there is no unselected track to restore.
         if ("0".equals(id)) {
             mAppOverrideTrackId.remove(type);
-            if (Boolean.TRUE.equals(mIsUnselected.getOrDefault(type, false)) && mSelectedTracks.get(type) != null) {
-                Log.i(TAG, "Restoring previously selected track of type: " + type);
-                mIsUnselected.remove(type);
-                mDvbIView.selectTrack(TRACK_TYPE_LOOKUP.get(type), mSelectedTracks.get(type).getId().split(":")[0]);
-                return true;
+            if (isAppUnselectedLocked(type)) {
+                TvTrackInfo previous = mTrackBeforeUnselect.get(type);
+                if (previous == null) {
+                    previous = mSelectedTracks.get(type);
+                }
+                if (previous != null) {
+                    Log.i(TAG, "Restoring previously selected track of type: " + type);
+                    mIsUnselected.remove(type);
+                    mTrackBeforeUnselect.remove(type);
+                    mDvbIView.selectTrack(TRACK_TYPE_LOOKUP.get(type), previous.getId().split(":")[0]);
+                    return true;
+                }
             }
         }
         for (TvTrackInfo track : mTracks) {
@@ -1580,6 +1618,10 @@ public class DvbIClient {
                 if (id == null || id.isEmpty()) {
                     if (fromApp) {
                         mAppOverrideTrackId.remove(type);
+                    }
+                    TvTrackInfo current = mSelectedTracks.get(type);
+                    if (current != null) {
+                        mTrackBeforeUnselect.put(type, current);
                     }
                     mDvbIView.selectTrack(TRACK_TYPE_LOOKUP.get(type), "undefined");
                     mIsUnselected.put(type, true);
@@ -1592,6 +1634,7 @@ public class DvbIClient {
                         mSubtitlesEnabled = true;
                     }
                     mIsUnselected.remove(type);
+                    mTrackBeforeUnselect.remove(type);
                     mDvbIView.selectTrack(TRACK_TYPE_LOOKUP.get(type), id.split(":")[0]);
                     return true;
                 }
@@ -1602,6 +1645,10 @@ public class DvbIClient {
 
     private boolean appOverrideStillPresentLocked(int type) {
         return findTrack(mTracks, type, mAppOverrideTrackId.get(type)) != null;
+    }
+
+    private boolean isAppUnselectedLocked(int type) {
+        return Boolean.TRUE.equals(mIsUnselected.get(type));
     }
 
     private static TvTrackInfo findTrack(List<TvTrackInfo> tracks, int type, String id) {
@@ -1796,6 +1843,7 @@ public class DvbIClient {
                 mStreamEventsLookup.clear();
                 mSelectedTracks.clear();
                 mIsUnselected.clear();
+                mTrackBeforeUnselect.clear();
                 mAppOverrideTrackId.clear();
             }
             return true;
@@ -1937,6 +1985,7 @@ public class DvbIClient {
         mTracks.clear();
         mSelectedTracks.clear();
         mIsUnselected.clear();
+        mTrackBeforeUnselect.clear();
         mAppOverrideTrackId.clear();
         mDvbIView.tuneOff();
     }
